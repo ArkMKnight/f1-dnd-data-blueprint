@@ -1,6 +1,9 @@
 // F1 × DnD Core Data Models
 
-// Enums for type safety
+// ============================================
+// ENUMS
+// ============================================
+
 export type CarStat = 
   | 'lowSpeedCornering'
   | 'mediumSpeedCornering'
@@ -24,34 +27,45 @@ export type RacePhase =
   | 'lateRace'
   | 'finalLap';
 
-// Core Models
+export type DiceType = 'd6' | 'dX';
+
+export type CheckType = 
+  | 'overtake'
+  | 'defend'
+  | 'puncture'
+  | 'awareness'
+  | 'opportunitySelection';
+
+// ============================================
+// CORE MODELS
+// ============================================
 
 export interface Driver {
   id: string;
   name: string;
   teamId: string;
-  pace: number;        // 1-20: Baseline speed and race pace performance
-  qualifying: number;  // 1-20: Performance in qualifying sessions only
-  racecraft: number;   // 1-20: Overtaking, defending, wheel-to-wheel battles
-  awareness: number;   // 1-20: Avoiding incidents, penalties, and mistakes
-  adaptability: number; // 1-20: Handling changing conditions and unexpected events
+  pace: number;         // 1-20
+  qualifying: number;   // 1-20
+  racecraft: number;    // 1-20
+  awareness: number;    // 1-20
+  adaptability: number; // 1-20
 }
 
 export interface Car {
   id: string;
   teamId: string;
-  lowSpeedCornering: number;    // 0-200: Performance in slow corners
-  mediumSpeedCornering: number; // 0-200: Performance in medium-speed corners
-  highSpeedCornering: number;   // 0-200: Performance in fast, sweeping corners
-  topSpeed: number;             // 0-200: Maximum straight-line velocity
-  acceleration: number;         // 0-200: Speed gained out of corners
+  lowSpeedCornering: number;    // 0-200
+  mediumSpeedCornering: number; // 0-200
+  highSpeedCornering: number;   // 0-200
+  topSpeed: number;             // 0-200
+  acceleration: number;         // 0-200
 }
 
 export interface Team {
   id: string;
   name: string;
-  driverIds: string[];  // References to team's Drivers (typically 2)
-  carId: string;        // Reference to team's Car spec
+  driverIds: string[];
+  carId: string;
 }
 
 export interface Trait {
@@ -59,7 +73,7 @@ export interface Trait {
   name: string;
   description: string;
   type: TraitType;
-  triggerCondition: string | null;  // Only for conditional traits
+  triggerCondition: string | null;
   targetDriverStat: DriverStat | null;
   racePhase: RacePhase | null;
 }
@@ -73,3 +87,89 @@ export interface Track {
   deterministicTraits: Trait[];
   conditionalTraits: Trait[];
 }
+
+// ============================================
+// DICE RESOLUTION MODELS
+// ============================================
+
+export interface DiceCheck {
+  type: CheckType;
+  diceType: DiceType;
+  diceSize: number;  // 6 for d6, or driver count for dX
+}
+
+export interface DiceResult {
+  checkType: CheckType;
+  roll: number;
+  diceSize: number;
+}
+
+// ============================================
+// AWARENESS OUTCOME SYSTEM
+// ============================================
+
+export type AwarenessDifferenceThreshold = 
+  | 'majorDisadvantage'   // -6 or lower
+  | 'minorDisadvantage'   // -3 to -5
+  | 'neutral'             // -2 to +2
+  | 'minorAdvantage'      // +3 to +5
+  | 'majorAdvantage';     // +6 or higher
+
+export interface AwarenessOutcomeTable {
+  threshold: AwarenessDifferenceThreshold;
+  outcomes: Record<number, string>; // d6 roll -> outcome description
+}
+
+// ============================================
+// TRACK COMPATIBILITY
+// ============================================
+
+export interface TrackCompatibilityEntry {
+  minValue: number;
+  maxValue: number;
+  modifier: number;
+}
+
+// ============================================
+// RESOLUTION FLOW
+// ============================================
+
+export interface ResolutionContext {
+  track: Track;
+  drivers: Driver[];
+  cars: Car[];
+  currentPhase: RacePhase;
+  currentLap: number;
+}
+
+export interface CheckResolution {
+  driverId: string;
+  checkType: CheckType;
+  diceResult: DiceResult;
+  modifiersApplied: string[];
+  outcome: string;
+}
+
+// ============================================
+// STAT CONSTRAINTS (for validation)
+// ============================================
+
+export const DRIVER_STAT_RANGE = { min: 1, max: 20 } as const;
+export const CAR_STAT_RANGE = { min: 0, max: 200 } as const;
+export const COMPATIBILITY_CAP = 200 as const;
+
+export const CAR_STATS: CarStat[] = [
+  'lowSpeedCornering',
+  'mediumSpeedCornering', 
+  'highSpeedCornering',
+  'topSpeed',
+  'acceleration'
+];
+
+export const DRIVER_STATS: DriverStat[] = [
+  'pace',
+  'qualifying',
+  'racecraft',
+  'awareness',
+  'adaptability'
+];
