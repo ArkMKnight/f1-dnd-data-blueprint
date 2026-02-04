@@ -89,18 +89,51 @@ export interface Track {
 }
 
 // ============================================
-// DICE RESOLUTION MODELS
+// DICE CONTROL SYSTEM
 // ============================================
 
+// Roll modes determine how dice values are obtained
+export type RollMode = 'manual' | 'auto';
+
+// DiceRequest is the input to the dice system
+// Resolution logic creates requests; the dice system produces results
+export interface DiceRequest {
+  checkType: CheckType;
+  diceType: DiceType;
+  diceSize: number;           // 6 for d6, 20 for d20, or driver count for dX
+  rollMode: RollMode;
+  manualResult?: number;      // Required when rollMode is 'manual'
+}
+
+// DiceResult is the output consumed by resolution logic
+// Resolution MUST NOT know whether the roll was manual or auto
+export interface DiceResult {
+  checkType: CheckType;
+  diceType: DiceType;
+  diceSize: number;
+  roll: number;               // Final roll value (from manual input or random generation)
+}
+
+// Dice resolution function type
+// Converts a DiceRequest into a DiceResult, abstracting the roll source
+export type DiceResolver = (request: DiceRequest) => DiceResult;
+
+// Validation: manual rolls must provide manualResult within valid range [1, diceSize]
+export const isValidDiceRequest = (request: DiceRequest): boolean => {
+  if (request.rollMode === 'manual') {
+    return (
+      request.manualResult !== undefined &&
+      request.manualResult >= 1 &&
+      request.manualResult <= request.diceSize
+    );
+  }
+  return true; // Auto mode is always valid
+};
+
+// Legacy interface for backward compatibility
 export interface DiceCheck {
   type: CheckType;
   diceType: DiceType;
-  diceSize: number;  // 6 for d6, or driver count for dX
-}
-
-export interface DiceResult {
-  checkType: CheckType;
-  roll: number;
   diceSize: number;
 }
 
