@@ -108,17 +108,23 @@ export interface DiceResult {
 // AWARENESS OUTCOME SYSTEM
 // ============================================
 
+// Resolution rules:
+// - Neutral threshold: NO dice roll, automatically resolves as "Clean racing"
+// - Minor/Major thresholds: Roll d6 and consult outcome table
+
 export type AwarenessDifferenceThreshold = 
-  | 'majorDisadvantage'   // -6 or lower
-  | 'minorDisadvantage'   // -3 to -5
-  | 'neutral'             // -2 to +2
-  | 'minorAdvantage'      // +3 to +5
-  | 'majorAdvantage';     // +6 or higher
+  | 'majorDisadvantage'   // -6 or lower  → roll d6
+  | 'minorDisadvantage'   // -3 to -5     → roll d6
+  | 'neutral'             // -2 to +2     → NO roll, "Clean racing"
+  | 'minorAdvantage'      // +3 to +5     → roll d6
+  | 'majorAdvantage';     // +6 or higher → roll d6
 
 export interface AwarenessOutcomeTable {
-  threshold: AwarenessDifferenceThreshold;
+  threshold: Exclude<AwarenessDifferenceThreshold, 'neutral'>; // Only non-neutral thresholds have tables
   outcomes: Record<number, string>; // d6 roll -> outcome description
 }
+
+export const NEUTRAL_AWARENESS_OUTCOME = 'Clean racing' as const;
 
 // ============================================
 // TRACK COMPATIBILITY
