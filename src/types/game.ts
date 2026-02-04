@@ -27,7 +27,7 @@ export type RacePhase =
   | 'lateRace'
   | 'finalLap';
 
-export type DiceType = 'd6' | 'dX';
+export type DiceType = 'd6' | 'd20' | 'dX';
 
 export type CheckType = 
   | 'overtake'
