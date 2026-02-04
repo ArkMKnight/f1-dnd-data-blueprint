@@ -127,6 +127,44 @@ export interface AwarenessOutcomeTable {
 export const NEUTRAL_AWARENESS_OUTCOME = 'Clean racing' as const;
 
 // ============================================
+// TIRE SYSTEM
+// ============================================
+
+// Resolution rules:
+// 1. Each tire has a hidden absolute lap limit (not visible to player)
+// 2. When tire FIRST exceeds hidden limit:
+//    - Apply -1 Pace modifier (ONE TIME ONLY, does not stack)
+// 3. For EVERY lap beyond hidden limit:
+//    - Roll 1d6 for puncture check: 1 = puncture (immediate pit stop), 2-6 = safe
+// 4. When tire reaches absolute end of effective range:
+//    - Mandatory pit stop, no roll required
+
+export interface TireState {
+  currentLap: number;
+  hiddenLapLimit: number;        // Hidden threshold before degradation begins
+  absoluteEndLap: number;        // Mandatory pit stop threshold
+  hasExceededLimit: boolean;     // Tracks if -1 Pace was already applied
+  isPunctured: boolean;
+}
+
+export interface TirePunctureCheck {
+  diceType: 'd6';
+  punctureOnRoll: 1;             // Only roll of 1 causes puncture
+  safeRange: [2, 3, 4, 5, 6];    // Rolls 2-6 are safe
+}
+
+export type TireResolutionOutcome =
+  | 'withinLimit'                // Lap <= hiddenLapLimit, no effects
+  | 'firstDegradation'           // First lap exceeding limit, apply -1 Pace
+  | 'punctureCheck'              // Beyond limit, roll d6
+  | 'puncture'                   // Rolled 1, immediate pit stop
+  | 'safe'                       // Rolled 2-6, continue racing
+  | 'mandatoryPitStop';          // Reached absoluteEndLap
+
+export const TIRE_DEGRADATION_PACE_PENALTY = -1 as const;
+export const TIRE_PUNCTURE_ROLL = 1 as const;
+
+// ============================================
 // TRACK COMPATIBILITY
 // ============================================
 
