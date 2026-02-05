@@ -602,3 +602,120 @@ export const DRIVER_STATS: DriverStat[] = [
   'awareness',
   'adaptability'
 ];
+
+// ============================================
+// INTENT DECLARATION SYSTEM
+// ============================================
+
+// Intent declaration occurs AFTER opportunity selection, BEFORE any dice rolls
+// This is a DM-controlled manual bypass of the normal resolution flow
+
+export type OvertakeIntent = 
+  | 'defenderYields'      // Defender allows attacker to pass
+  | 'attackerForfeits'    // Attacker abandons overtake attempt
+  | 'contested';          // Normal resolution (default)
+
+// Intent declaration input from DM
+export interface IntentDeclaration {
+  attackerId: string;
+  defenderId: string;
+  declaredIntent: OvertakeIntent;
+}
+
+// Defender Yields Resolution
+// - Positions swap immediately
+// - No dice rolls occur
+// - No Awareness check triggered
+// - No Momentum Loss or Damage possible
+// - Cannot trigger Safety Car or Red Flag
+export interface DefenderYieldsResult {
+  type: 'defenderYields';
+  attackerId: string;
+  defenderId: string;
+  positionsSwapped: true;
+  rollsOccurred: false;
+  awarenessCheckTriggered: false;
+  damageHandoff: null;
+  flagTriggered: 'green';
+}
+
+// Attacker Forfeits Resolution
+// - No position change
+// - No rolls or Awareness checks
+// - Overtake opportunity consumed (cannot retry immediately)
+// - No penalties applied
+export interface AttackerForfeitsResult {
+  type: 'attackerForfeits';
+  attackerId: string;
+  defenderId: string;
+  positionsSwapped: false;
+  rollsOccurred: false;
+  awarenessCheckTriggered: false;
+  opportunityConsumed: true;
+  canRetryImmediately: false;
+}
+
+// Union type for intent resolution outcomes
+export type IntentResolutionResult = 
+  | DefenderYieldsResult 
+  | AttackerForfeitsResult 
+  | null; // null means proceed to normal contested resolution
+
+// Utility: Check if intent bypasses normal resolution
+export const intentBypassesResolution = (intent: OvertakeIntent): boolean => {
+  return intent !== 'contested';
+};
+
+// Utility: Resolve Defender Yields
+export const resolveDefenderYields = (
+  attackerId: string,
+  defenderId: string
+): DefenderYieldsResult => ({
+  type: 'defenderYields',
+  attackerId,
+  defenderId,
+  positionsSwapped: true,
+  rollsOccurred: false,
+  awarenessCheckTriggered: false,
+  damageHandoff: null,
+  flagTriggered: 'green',
+});
+
+// Utility: Resolve Attacker Forfeits
+export const resolveAttackerForfeits = (
+  attackerId: string,
+  defenderId: string
+): AttackerForfeitsResult => ({
+  type: 'attackerForfeits',
+  attackerId,
+  defenderId,
+  positionsSwapped: false,
+  rollsOccurred: false,
+  awarenessCheckTriggered: false,
+  opportunityConsumed: true,
+  canRetryImmediately: false,
+});
+
+// Utility: Resolve intent declaration
+// Returns null if contested (proceed to normal resolution)
+export const resolveIntentDeclaration = (
+  declaration: IntentDeclaration
+): IntentResolutionResult => {
+  switch (declaration.declaredIntent) {
+    case 'defenderYields':
+      return resolveDefenderYields(declaration.attackerId, declaration.defenderId);
+    case 'attackerForfeits':
+      return resolveAttackerForfeits(declaration.attackerId, declaration.defenderId);
+    case 'contested':
+      return null; // Proceed to normal resolution
+  }
+};
+
+// Resolution flow with intent declaration:
+// 1. Opportunity Selection (dX roll)
+// 2. Intent Declaration Phase (DM manual - NEW)
+//    - If defenderYields or attackerForfeits → skip to step 6
+// 3. Overtake/Defense rolls (d20 + modifiers)
+// 4. Awareness check (if triggered)
+// 5. Damage resolution (if applicable)
+// 6. Tire & pit stop checks
