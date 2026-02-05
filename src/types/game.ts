@@ -751,11 +751,127 @@ export const FRONT_WING_REPAIR_ADDITIONAL_LOSS = 1 as const;
 // TRACK COMPATIBILITY
 // ============================================
 
+// Driver stats affected by Track Compatibility modifiers
+// ONLY these stats receive car performance bonuses from track compatibility
+export type TrackCompatibilityAffectedStat = 'pace' | 'qualifying' | 'racecraft';
+
+// Driver stats NOT affected by Track Compatibility
+// These are driver-only stats that remain unchanged by car performance
+export type TrackCompatibilityExcludedStat = 'awareness' | 'adaptability';
+
+// Compile-time validation that affected + excluded = all driver stats
+export const TRACK_COMPATIBILITY_AFFECTED_STATS: TrackCompatibilityAffectedStat[] = [
+  'pace',
+  'qualifying',
+  'racecraft'
+];
+
+export const TRACK_COMPATIBILITY_EXCLUDED_STATS: TrackCompatibilityExcludedStat[] = [
+  'awareness',
+  'adaptability'
+];
+
 export interface TrackCompatibilityEntry {
   minValue: number;
   maxValue: number;
   modifier: number;
 }
+
+// Track Compatibility calculation
+// Sum primary + secondary car stats, cap at 200, then lookup modifier
+export interface TrackCompatibilityResult {
+  primaryStatValue: number;
+  secondaryStatValue: number;
+  rawSum: number;
+  cappedValue: number;
+  modifier: number;
+}
+
+// Utility: Check if a driver stat is affected by Track Compatibility
+export const isStatAffectedByTrackCompatibility = (
+  stat: DriverStat
+): stat is TrackCompatibilityAffectedStat => {
+  return TRACK_COMPATIBILITY_AFFECTED_STATS.includes(stat as TrackCompatibilityAffectedStat);
+};
+
+// Utility: Calculate Track Compatibility modifier from car stats
+export const calculateTrackCompatibility = (
+  car: Car,
+  track: Track,
+  lookupTable: TrackCompatibilityEntry[]
+): TrackCompatibilityResult => {
+  const primaryStatValue = car[track.primaryCarStat];
+  const secondaryStatValue = car[track.secondaryCarStat];
+  const rawSum = primaryStatValue + secondaryStatValue;
+  const cappedValue = Math.min(rawSum, COMPATIBILITY_CAP);
+  
+  // Find matching entry in lookup table
+  const entry = lookupTable.find(
+    e => cappedValue >= e.minValue && cappedValue <= e.maxValue
+  );
+  const modifier = entry?.modifier ?? 0;
+  
+  return {
+    primaryStatValue,
+    secondaryStatValue,
+    rawSum,
+    cappedValue,
+    modifier,
+  };
+};
+
+// Utility: Apply Track Compatibility modifier to a specific stat
+// Returns original value if stat is not affected by Track Compatibility
+export const applyTrackCompatibilityToStat = (
+  statName: DriverStat,
+  baseValue: number,
+  trackCompatibilityModifier: number
+): { modifiedValue: number; wasModified: boolean } => {
+  if (isStatAffectedByTrackCompatibility(statName)) {
+    return {
+      modifiedValue: baseValue + trackCompatibilityModifier,
+      wasModified: true,
+    };
+  }
+  // Awareness and Adaptability are driver-only stats
+  return {
+    modifiedValue: baseValue,
+    wasModified: false,
+  };
+};
+
+// Utility: Get all modified driver stats for a given car/track combination
+export const getTrackCompatibilityModifiedStats = (
+  driver: Driver,
+  car: Car,
+  track: Track,
+  lookupTable: TrackCompatibilityEntry[]
+): Record<DriverStat, { base: number; modified: number; wasModified: boolean }> => {
+  const compatibility = calculateTrackCompatibility(car, track, lookupTable);
+  
+  return {
+    pace: {
+      base: driver.pace,
+      ...applyTrackCompatibilityToStat('pace', driver.pace, compatibility.modifier),
+    },
+    qualifying: {
+      base: driver.qualifying,
+      ...applyTrackCompatibilityToStat('qualifying', driver.qualifying, compatibility.modifier),
+    },
+    racecraft: {
+      base: driver.racecraft,
+      ...applyTrackCompatibilityToStat('racecraft', driver.racecraft, compatibility.modifier),
+    },
+    awareness: {
+      base: driver.awareness,
+      ...applyTrackCompatibilityToStat('awareness', driver.awareness, compatibility.modifier),
+    },
+    adaptability: {
+      base: driver.adaptability,
+      ...applyTrackCompatibilityToStat('adaptability', driver.adaptability, compatibility.modifier),
+    },
+  };
+};
 
 // ============================================
 // RESOLUTION FLOW
