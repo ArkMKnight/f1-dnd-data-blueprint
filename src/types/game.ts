@@ -85,6 +85,7 @@ export interface Track {
   lapCount: number;
   primaryCarStat: CarStat;
   secondaryCarStat: CarStat;
+  momentumLossPositions: number;   // Positions lost when Momentum Loss occurs
   deterministicTraits: Trait[];
   conditionalTraits: Trait[];
 }
@@ -234,9 +235,17 @@ export interface PositionShiftResolution {
 // Momentum Loss tracking
 export interface MomentumLossState {
   hasLostMomentum: boolean;
-  // Momentum loss does not stack
-  // Results in position/time loss as defined elsewhere
+  positionsLost: number;           // Defined by track.momentumLossPositions
+  // Momentum Loss rules:
+  // - Does not stack (hasLostMomentum prevents re-application)
+  // - Does not apply stat penalties
+  // - Cannot escalate into damage
+  // - Does not trigger Safety Car or Red Flag
 }
+
+// Momentum Loss resolution timing: After Awareness, before Damage/Tire/Pit
+export const MOMENTUM_LOSS_CANNOT_CAUSE_DAMAGE = true as const;
+export const MOMENTUM_LOSS_CANNOT_STACK = true as const;
 
 // Awareness Check Input
 export interface AwarenessCheckInput {
