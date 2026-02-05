@@ -27,6 +27,8 @@ export type RacePhase =
   | 'lateRace'
   | 'finalLap';
 
+export type TyreCompound = 'soft' | 'medium' | 'hard' | 'intermediate' | 'wet';
+
 export type DiceType = 'd6' | 'd20' | 'dX';
 
 export type CheckType = 
@@ -86,8 +88,31 @@ export interface Track {
   primaryCarStat: CarStat;
   secondaryCarStat: CarStat;
   momentumLossPositions: number;   // Positions lost when Momentum Loss occurs
+  // Pit Stop Parameters
+  pitLossNormal: number;           // Positions lost under green flag
+  pitLossSafetyCar: number;        // Reduced positions lost under SC
+  pitLossFrontWing: number;        // Additional loss for front wing repair
+  pitLossDoubleStack: number;      // Additional loss for second car in double stack
+  // Tyre Degradation Parameters (per compound)
+  tyreDegradation: TyreDegradationConfig;
   deterministicTraits: Trait[];
   conditionalTraits: Trait[];
+}
+
+// Track-specific tyre degradation configuration
+export interface TyreCompoundConfig {
+  effectiveLapRangeStart: number;  // First lap of optimal performance
+  effectiveLapRangeEnd: number;    // Last lap of optimal performance
+  hiddenMaxLimit: number;          // Hidden threshold before degradation begins
+  absoluteEndLap: number;          // Mandatory pit stop threshold
+}
+
+export interface TyreDegradationConfig {
+  soft: TyreCompoundConfig;
+  medium: TyreCompoundConfig;
+  hard: TyreCompoundConfig;
+  intermediate: TyreCompoundConfig;
+  wet: TyreCompoundConfig;
 }
 
 // ============================================
@@ -435,6 +460,179 @@ export type TireResolutionOutcome =
 
 export const TIRE_DEGRADATION_PACE_PENALTY = -1 as const;
 export const TIRE_PUNCTURE_ROLL = 1 as const;
+
+// ============================================
+// PIT STOP SYSTEM
+// ============================================
+
+// Pit Decision Phase occurs at the beginning of each lap, before on-track resolution
+// The DM declares whether a driver pits; forced conditions override voluntary decisions
+
+// Starting tyre selection (before race begins)
+export interface StartingTyreSelection {
+  driverId: string;
+  compound: TyreCompound;
+}
+
+// Driver's current tyre state during race
+export interface DriverTyreState {
+  driverId: string;
+  compound: TyreCompound;
+  currentLap: number;              // Laps on current set
+  hasExceededHiddenLimit: boolean; // -1 Pace applied (one-time)
+  isPunctured: boolean;
+  isDeadTyre: boolean;             // Reached absolute end lap
+}
+
+// Forced pit conditions
+export type ForcedPitReason = 'puncture' | 'deadTyres';
+
+export interface ForcedPitCondition {
+  isForced: boolean;
+  reason: ForcedPitReason | null;
+}
+
+// Pit stop decision (DM-controlled)
+export interface PitStopDecision {
+  driverId: string;
+  lap: number;
+  isVoluntary: boolean;
+  forcedReason: ForcedPitReason | null;
+  newCompound: TyreCompound;
+  isDoubleStack: boolean;          // Second car of teammate pit on same lap
+}
+
+// Pit stop resolution result
+export interface PitStopResult {
+  driverId: string;
+  lap: number;
+  previousCompound: TyreCompound;
+  newCompound: TyreCompound;
+  // Position loss calculation
+  basePitLoss: number;             // From track.pitLossNormal or track.pitLossSafetyCar
+  frontWingRepairLoss: number;     // From track.pitLossFrontWing (0 if no repair)
+  doubleStackLoss: number;         // From track.pitLossDoubleStack (0 if not applicable)
+  totalPositionLoss: number;       // Sum of all losses
+  // State changes
+  tyreStateReset: boolean;         // Always true after pit
+  frontWingRepaired: boolean;      // True if front wing damage was present and repaired
+  // Context
+  underSafetyCar: boolean;
+}
+
+// Pit stop cannot occur mid-lap or be partially resolved
+export const PIT_STOP_ATOMIC = true as const;
+export const PIT_STOP_NO_DICE_REQUIRED = true as const;
+
+// Utility: Check for forced pit conditions
+export const checkForcedPitCondition = (
+  tyreState: DriverTyreState
+): ForcedPitCondition => {
+  if (tyreState.isPunctured) {
+    return { isForced: true, reason: 'puncture' };
+  }
+  if (tyreState.isDeadTyre) {
+    return { isForced: true, reason: 'deadTyres' };
+  }
+  return { isForced: false, reason: null };
+};
+
+// Utility: Calculate pit stop position loss
+export const calculatePitStopPositionLoss = (
+  track: Track,
+  hasFrontWingDamage: boolean,
+  isDoubleStack: boolean,
+  underSafetyCar: boolean
+): {
+  basePitLoss: number;
+  frontWingRepairLoss: number;
+  doubleStackLoss: number;
+  totalPositionLoss: number;
+} => {
+  const basePitLoss = underSafetyCar ? track.pitLossSafetyCar : track.pitLossNormal;
+  const frontWingRepairLoss = hasFrontWingDamage ? track.pitLossFrontWing : 0;
+  const doubleStackLoss = isDoubleStack ? track.pitLossDoubleStack : 0;
+  
+  return {
+    basePitLoss,
+    frontWingRepairLoss,
+    doubleStackLoss,
+    totalPositionLoss: basePitLoss + frontWingRepairLoss + doubleStackLoss,
+  };
+};
+
+// Utility: Resolve pit stop
+export const resolvePitStop = (
+  decision: PitStopDecision,
+  track: Track,
+  currentTyreState: DriverTyreState,
+  currentDamageState: DriverDamageState,
+  underSafetyCar: boolean
+): PitStopResult => {
+  const positionLoss = calculatePitStopPositionLoss(
+    track,
+    currentDamageState.hasFrontWingDamage,
+    decision.isDoubleStack,
+    underSafetyCar
+  );
+  
+  return {
+    driverId: decision.driverId,
+    lap: decision.lap,
+    previousCompound: currentTyreState.compound,
+    newCompound: decision.newCompound,
+    basePitLoss: positionLoss.basePitLoss,
+    frontWingRepairLoss: positionLoss.frontWingRepairLoss,
+    doubleStackLoss: positionLoss.doubleStackLoss,
+    totalPositionLoss: positionLoss.totalPositionLoss,
+    tyreStateReset: true,
+    frontWingRepaired: currentDamageState.hasFrontWingDamage,
+    underSafetyCar,
+  };
+};
+
+// Utility: Create fresh tyre state after pit stop
+export const createFreshTyreState = (
+  driverId: string,
+  compound: TyreCompound
+): DriverTyreState => ({
+  driverId,
+  compound,
+  currentLap: 0,
+  hasExceededHiddenLimit: false,
+  isPunctured: false,
+  isDeadTyre: false,
+});
+
+// Utility: Check if tyre has reached hidden limit for track/compound
+export const hasTyreExceededHiddenLimit = (
+  tyreState: DriverTyreState,
+  track: Track
+): boolean => {
+  const compoundConfig = track.tyreDegradation[tyreState.compound];
+  return tyreState.currentLap > compoundConfig.hiddenMaxLimit;
+};
+
+// Utility: Check if tyre has reached absolute end (dead tyre)
+export const isTyreDead = (
+  tyreState: DriverTyreState,
+  track: Track
+): boolean => {
+  const compoundConfig = track.tyreDegradation[tyreState.compound];
+  return tyreState.currentLap >= compoundConfig.absoluteEndLap;
+};
+
+// Resolution flow with pit stops:
+// 1. Pit Decision Phase (lap start, before on-track)
+//    - Check forced pit conditions
+//    - DM declares voluntary pits
+//    - Resolve pit stops (atomic, no dice)
+// 2. Opportunity Selection (dX roll)
+// 3. Intent Declaration Phase (DM manual)
+// 4. Overtake/Defense rolls (d20 + modifiers)
+// 5. Awareness check (if triggered)
+// 6. Damage resolution (if applicable)
+// 7. Tire degradation checks (end of lap)
 
 // ============================================
 // DAMAGE SYSTEM
