@@ -34,7 +34,8 @@ export type CheckType =
   | 'defend'
   | 'puncture'
   | 'awareness'
-  | 'opportunitySelection';
+  | 'opportunitySelection'
+  | 'damageLocation';
 
 // ============================================
 // CORE MODELS
@@ -196,6 +197,119 @@ export type TireResolutionOutcome =
 
 export const TIRE_DEGRADATION_PACE_PENALTY = -1 as const;
 export const TIRE_PUNCTURE_ROLL = 1 as const;
+
+// ============================================
+// DAMAGE SYSTEM
+// ============================================
+
+// Resolution timing: After Awareness resolution, before Tire/Pit checks
+
+// Damage states are mutually exclusive and non-stackable
+// Escalation: none → minor → major → dnf
+export type DamageState = 'none' | 'minor' | 'major' | 'dnf';
+
+// Damage location (determined by d6 roll of 1)
+export type DamageLocation = 'frontWing' | 'other';
+
+// Driver damage tracking
+export interface DriverDamageState {
+  state: DamageState;
+  location: DamageLocation | null;        // Only set when state is 'minor' or 'major'
+  hasFrontWingDamage: boolean;            // Can be repaired during pit stop
+}
+
+// Damage modifiers
+// Minor: -2 to all driver stats (persistent)
+// Major: -4 to total roll result for all checks (not stats)
+export const MINOR_DAMAGE_STAT_MODIFIER = -2 as const;
+export const MAJOR_DAMAGE_ROLL_MODIFIER = -4 as const;
+export const FRONT_WING_DAMAGE_ROLL = 1 as const;
+
+// Damage escalation rules
+// - none + minor = minor
+// - none + major = major
+// - minor + minor = major (escalation)
+// - minor + major = major
+// - major + minor = major (no change)
+// - major + major = dnf (escalation)
+// - any + dnf = dnf
+export const escalateDamage = (
+  current: DamageState, 
+  incoming: Exclude<DamageState, 'none'>
+): DamageState => {
+  if (current === 'dnf' || incoming === 'dnf') return 'dnf';
+  if (current === 'none') return incoming;
+  if (current === 'minor' && incoming === 'minor') return 'major';
+  if (current === 'minor' && incoming === 'major') return 'major';
+  if (current === 'major' && incoming === 'major') return 'dnf';
+  return current; // major + minor = major (no change)
+};
+
+// Damage application result
+export interface DamageApplicationResult {
+  previousState: DamageState;
+  newState: DamageState;
+  wasEscalated: boolean;
+  locationRoll?: DiceResult;              // d6 roll for front wing check
+  isFrontWingDamage: boolean;
+}
+
+// ============================================
+// RACE FLAGS (Safety Car / Red Flag)
+// ============================================
+
+export type RaceFlag = 'green' | 'safetyCar' | 'redFlag';
+
+// Safety Car is deployed when BOTH drivers in a collision receive Major Damage
+// Red Flag is deployed when BOTH drivers in a collision receive DNF
+
+export interface SafetyCarState {
+  isActive: boolean;
+  tyreDegradationPaused: boolean;         // Tire wear stops under SC
+  reducedPitPositionLoss: boolean;        // Pit stops lose fewer positions
+}
+
+export interface RedFlagState {
+  isActive: boolean;
+  positionsPreserved: boolean;            // Current positions frozen
+  freePitStopAvailable: boolean;          // All drivers get voluntary free pit
+}
+
+// Collision resolution combines Awareness outcome with Damage determination
+export interface CollisionResolution {
+  driver1Id: string;
+  driver2Id: string;
+  driver1DamageResult: DamageApplicationResult;
+  driver2DamageResult: DamageApplicationResult;
+  flagTriggered: RaceFlag;
+}
+
+// Safety Car trigger condition
+export const checkSafetyCarTrigger = (
+  driver1State: DamageState,
+  driver2State: DamageState
+): boolean => driver1State === 'major' && driver2State === 'major';
+
+// Red Flag trigger condition
+export const checkRedFlagTrigger = (
+  driver1State: DamageState,
+  driver2State: DamageState
+): boolean => driver1State === 'dnf' && driver2State === 'dnf';
+
+// Determine flag from collision outcome
+export const determineRaceFlag = (
+  driver1State: DamageState,
+  driver2State: DamageState
+): RaceFlag => {
+  if (checkRedFlagTrigger(driver1State, driver2State)) return 'redFlag';
+  if (checkSafetyCarTrigger(driver1State, driver2State)) return 'safetyCar';
+  return 'green';
+};
+
+// Pit stop position loss modifiers
+export const NORMAL_PIT_POSITION_LOSS = 3 as const;
+export const SAFETY_CAR_PIT_POSITION_LOSS = 1 as const;
+export const FRONT_WING_REPAIR_ADDITIONAL_LOSS = 1 as const;
 
 // ============================================
 // TRACK COMPATIBILITY
