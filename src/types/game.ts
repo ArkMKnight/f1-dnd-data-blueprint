@@ -849,26 +849,37 @@ export const getTrackCompatibilityModifiedStats = (
 ): Record<DriverStat, { base: number; modified: number; wasModified: boolean }> => {
   const compatibility = calculateTrackCompatibility(car, track, lookupTable);
   
+  const paceResult = applyTrackCompatibilityToStat('pace', driver.pace, compatibility.modifier);
+  const qualifyingResult = applyTrackCompatibilityToStat('qualifying', driver.qualifying, compatibility.modifier);
+  const racecraftResult = applyTrackCompatibilityToStat('racecraft', driver.racecraft, compatibility.modifier);
+  const awarenessResult = applyTrackCompatibilityToStat('awareness', driver.awareness, compatibility.modifier);
+  const adaptabilityResult = applyTrackCompatibilityToStat('adaptability', driver.adaptability, compatibility.modifier);
+  
   return {
     pace: {
       base: driver.pace,
-      ...applyTrackCompatibilityToStat('pace', driver.pace, compatibility.modifier),
+      modified: paceResult.modifiedValue,
+      wasModified: paceResult.wasModified,
     },
     qualifying: {
       base: driver.qualifying,
-      ...applyTrackCompatibilityToStat('qualifying', driver.qualifying, compatibility.modifier),
+      modified: qualifyingResult.modifiedValue,
+      wasModified: qualifyingResult.wasModified,
     },
     racecraft: {
       base: driver.racecraft,
-      ...applyTrackCompatibilityToStat('racecraft', driver.racecraft, compatibility.modifier),
+      modified: racecraftResult.modifiedValue,
+      wasModified: racecraftResult.wasModified,
     },
     awareness: {
       base: driver.awareness,
-      ...applyTrackCompatibilityToStat('awareness', driver.awareness, compatibility.modifier),
+      modified: awarenessResult.modifiedValue,
+      wasModified: awarenessResult.wasModified,
     },
     adaptability: {
       base: driver.adaptability,
-      ...applyTrackCompatibilityToStat('adaptability', driver.adaptability, compatibility.modifier),
+      modified: adaptabilityResult.modifiedValue,
+      wasModified: adaptabilityResult.wasModified,
     },
   };
 };
