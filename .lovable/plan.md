@@ -1,76 +1,99 @@
+# F1 × DnD System Freeze Directive
 
-
-## F1 × DnD Data Models
-
-### 1. Driver
-| Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `id` | string | - | Unique identifier |
-| `name` | string | - | Driver's display name |
-| `teamId` | string | - | Reference to Team |
-| `pace` | integer | 1-20 | Baseline speed and race pace performance |
-| `qualifying` | integer | 1-20 | Performance in qualifying sessions only |
-| `racecraft` | integer | 1-20 | Overtaking, defending, wheel-to-wheel battles |
-| `awareness` | integer | 1-20 | Avoiding incidents, penalties, and mistakes |
-| `adaptability` | integer | 1-20 | Handling changing conditions and unexpected events |
+**Status: FROZEN** — Last locked: 2026-02-05
 
 ---
 
-### 2. Car
-| Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `id` | string | - | Unique identifier |
-| `teamId` | string | - | Reference to Team |
-| `lowSpeedCornering` | integer | 0-200 | Performance in slow corners (hairpins, chicanes) |
-| `mediumSpeedCornering` | integer | 0-200 | Performance in medium-speed corners |
-| `highSpeedCornering` | integer | 0-200 | Performance in fast, sweeping corners |
-| `topSpeed` | integer | 0-200 | Maximum straight-line velocity |
-| `acceleration` | integer | 0-200 | Speed gained out of corners and off the line |
+## Locked Systems
+
+The following core systems are **stable and locked**. They must not be altered unless explicitly unfrozen by directive.
+
+| System | Status | Description |
+|--------|--------|-------------|
+| Driver Stats | 🔒 Locked | Pace, Qualifying, Racecraft, Awareness, Adaptability (1-20) |
+| Car Stats | 🔒 Locked | LowSpeedCornering, MediumSpeedCornering, HighSpeedCornering, TopSpeed, Acceleration (0-200) |
+| Track Compatibility | 🔒 Locked | Car stat → driver stat mapping; affects Pace/Qualifying/Racecraft only |
+| Awareness System | 🔒 Locked | Contested check triggers, difference thresholds, outcome tables |
+| Damage System | 🔒 Locked | None/Minor/Major/DNF states, escalation rules, front wing repairs |
+| Momentum Loss | 🔒 Locked | Position loss without contact, no stat penalties or escalation |
+| Safety Car & Red Flag | 🔒 Locked | Trigger conditions, tire pause, pit loss reduction |
+| Tyre System | 🔒 Locked | Compounds, degradation, puncture checks, forced pit conditions |
+| Pit Stop System | 🔒 Locked | Atomic resolution, position loss calculation, state resets |
+| Track Parameters | 🔒 Locked | Pit losses, momentum loss positions, tyre degradation configs |
+| Intent Declaration | 🔒 Locked | Defender yields, attacker forfeits, bypass logic |
+| Dice System | 🔒 Locked | d20 contested, d6 outcomes, dX opportunity selection |
 
 ---
 
-### 3. Team
-| Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `id` | string | - | Unique identifier |
-| `name` | string | - | Team's display name |
-| `driverIds` | string[] | - | References to team's Drivers (typically 2) |
-| `carId` | string | - | Reference to team's Car spec |
+## Extension Guidelines
 
-A Team represents organizational grouping only and does not provide performance modifiers unless explicitly defined by a future system.
+Future additions **must** be implemented as modular extensions that:
 
----
-
-### 4. Track
-| Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `id` | string | - | Unique identifier |
-| `name` | string | - | Track's display name (e.g., "Monaco", "Spa") |
-| `lapCount` | integer | 1+ | Fixed number of laps for the race |
-| `primaryCarStat` | enum | - | First car stat used for compatibility (one of the 5 car stats) |
-| `secondaryCarStat` | enum | - | Second car stat used for compatibility (one of the 5 car stats) |
-| `deterministicTraits` | Trait[] | - | Always-active traits that modify resolution rules |
-| `conditionalTraits` | Trait[] | - | Traits that trigger under explicit conditions |
-
-Traits may apply multiple stat-specific modifiers, but only as part of a single, explicitly defined modifier bundle, and only during resolution. Traits must not permanently modify base stats.
+1. **Do not modify** existing locked logic or data structures
+2. **Hook into** defined resolution points only:
+   - Lap Start (before Pit Decision)
+   - Post-Pit Decision
+   - Post-Opportunity Selection
+   - Post-Intent Declaration
+   - Post-Contested Rolls
+   - Post-Awareness Resolution
+   - Post-Damage Resolution
+   - Lap End (after Tyre Checks)
+3. **Can be enabled/disabled** without breaking the core system
+4. **Do not rebalance** or reinterpret frozen mechanics
 
 ---
 
-### 5. Trait (Sub-model for Track)
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique identifier |
-| `name` | string | Display name (e.g., "Street Circuit", "High Altitude") |
-| `description` | string | Human-readable effect description |
-| `type` | enum | `"deterministic"` or `"conditional"` |
-| `triggerCondition` | string | null | Condition text (only for conditional traits) |
-| `targetDriverStat` | enum | null | Which driver stat this trait references, if any |
-| `racePhase` | enum | null | Which phase this applies to (qualifying, race start, mid-race, etc.) |
+## Resolution Order (Frozen)
+
+1. Pit Decision Phase (Lap Start)
+2. Opportunity Selection (dX)
+3. Intent Declaration (Bypass)
+4. Contested Overtake/Defense Rolls (d20)
+5. Awareness Check (if triggered)
+6. Momentum Loss Resolution
+7. Damage Resolution
+8. Tyre Degradation Checks (Lap End)
 
 ---
 
-### Notes for Future Implementation
-- **Track Compatibility Modifier**: Calculated externally by summing the two selected car stats, capping at 200, then mapping via predefined table
-- **Dice resolution**: d6 for overtakes/defending/punctures/awareness checks; dX for opportunity selection
+## Data Models Reference
+
+### Driver
+| Field | Type | Range |
+|-------|------|-------|
+| pace | integer | 1-20 |
+| qualifying | integer | 1-20 |
+| racecraft | integer | 1-20 |
+| awareness | integer | 1-20 |
+| adaptability | integer | 1-20 |
+
+### Car
+| Field | Type | Range |
+|-------|------|-------|
+| lowSpeedCornering | integer | 0-200 |
+| mediumSpeedCornering | integer | 0-200 |
+| highSpeedCornering | integer | 0-200 |
+| topSpeed | integer | 0-200 |
+| acceleration | integer | 0-200 |
+
+### Track Race Parameters
+| Field | Type |
+|-------|------|
+| pitLossNormal | integer |
+| pitLossSafetyCar | integer |
+| pitLossFrontWing | integer |
+| pitLossDoubleStack | integer |
+| momentumLossPositions | integer |
+| tyreDegradation | map per compound |
+
+---
+
+## Notes
+
+- Track Compatibility modifiers apply to Pace, Qualifying, Racecraft only
+- Awareness and Adaptability are **driver-only** stats (never modified by car/track)
+- Damage resolution occurs after Awareness but before Tyre checks
+- Extensions may read frozen state but must not write to it
 - **Awareness outcome tables**: Separate lookup tables based on Awareness difference thresholds (not stored in model)
 
