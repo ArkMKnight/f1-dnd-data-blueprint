@@ -161,6 +161,235 @@ export interface AwarenessOutcomeTable {
 export const NEUTRAL_AWARENESS_OUTCOME = 'Clean racing' as const;
 
 // ============================================
+// AWARENESS RESOLUTION SYSTEM
+// ============================================
+
+// Awareness check triggers only when modified roll difference ≤ 3
+export const AWARENESS_CHECK_TRIGGER_THRESHOLD = 3 as const;
+
+// Special Conditions
+// Low Awareness Rule: If both drivers have Awareness < 10, treat difference as 3-6
+export const LOW_AWARENESS_THRESHOLD = 10 as const;
+export const LOW_AWARENESS_FORCED_DIFFERENCE_MIN = 3 as const;
+export const LOW_AWARENESS_FORCED_DIFFERENCE_MAX = 6 as const;
+
+// Evasion Priority: If Awareness difference ≥ 5, higher Awareness driver gets evasion
+export const EVASION_PRIORITY_THRESHOLD = 5 as const;
+
+// Awareness outcome types
+export type AwarenessOutcome =
+  | 'cleanRacing'
+  | 'positionShift'
+  | 'momentumLoss'
+  | 'miracleEscape'
+  | 'minorDamage'
+  | 'majorDamage'
+  | 'dnf';
+
+// Evasion priority downgrades outcomes by one tier
+export const EVASION_DOWNGRADE_MAP: Record<AwarenessOutcome, AwarenessOutcome> = {
+  cleanRacing: 'cleanRacing',     // Already best outcome
+  positionShift: 'cleanRacing',
+  momentumLoss: 'cleanRacing',
+  miracleEscape: 'miracleEscape', // Already clean
+  minorDamage: 'momentumLoss',
+  majorDamage: 'minorDamage',
+  dnf: 'majorDamage',
+};
+
+// Outcome tables for d6 rolls based on Awareness difference
+// Difference 3-6: Roll d6
+export const AWARENESS_OUTCOME_TABLE_3_TO_6: Record<number, AwarenessOutcome> = {
+  1: 'cleanRacing',
+  2: 'cleanRacing',
+  3: 'positionShift',
+  4: 'positionShift',
+  5: 'minorDamage',
+  6: 'minorDamage',
+};
+
+// Difference ≥ 7: Roll d6
+export const AWARENESS_OUTCOME_TABLE_7_PLUS: Record<number, AwarenessOutcome> = {
+  1: 'miracleEscape',
+  2: 'momentumLoss',
+  3: 'momentumLoss',
+  4: 'majorDamage',
+  5: 'majorDamage',
+  6: 'dnf',
+};
+
+// Position Shift Resolution
+export type PositionShiftResult = 
+  | 'attackerGainsPosition'       // Attacker has higher Awareness
+  | 'defenderRetainsAndAttackerDrops'; // Defender has higher Awareness
+
+export interface PositionShiftResolution {
+  result: PositionShiftResult;
+  attackerAwareness: number;
+  defenderAwareness: number;
+  attackerPositionChange: number;  // negative = drops positions
+  defenderPositionChange: number;
+}
+
+// Momentum Loss tracking
+export interface MomentumLossState {
+  hasLostMomentum: boolean;
+  // Momentum loss does not stack
+  // Results in position/time loss as defined elsewhere
+}
+
+// Awareness Check Input
+export interface AwarenessCheckInput {
+  attackerId: string;
+  defenderId: string;
+  attackerAwareness: number;
+  defenderAwareness: number;
+  modifiedRollDifference: number; // Absolute difference after Pace/Racecraft modifiers
+}
+
+// Awareness Check Result
+export interface AwarenessCheckResult {
+  triggered: boolean;              // False if roll difference > 3
+  awarenessDifference: number;     // After special condition adjustments
+  lowAwarenessRuleApplied: boolean;
+  evasionPriorityApplied: boolean;
+  evasionDriverId: string | null;  // Driver who has evasion priority
+  diceResult: DiceResult | null;   // d6 roll (null if difference ≤ 2)
+  rawOutcome: AwarenessOutcome;    // Before evasion downgrade
+  finalOutcome: AwarenessOutcome;  // After evasion downgrade
+  positionShiftResolution: PositionShiftResolution | null;
+  damageHandoff: DamageHandoff | null;
+}
+
+// Damage System Handoff
+// Awareness determines WHETHER damage occurs, not HOW it behaves
+export interface DamageHandoff {
+  targetDriverId: string;
+  damageType: Exclude<AwarenessOutcome, 'cleanRacing' | 'positionShift' | 'momentumLoss' | 'miracleEscape'>;
+}
+
+// Utility: Determine if Awareness check should trigger
+export const shouldTriggerAwarenessCheck = (
+  modifiedRollDifference: number
+): boolean => Math.abs(modifiedRollDifference) <= AWARENESS_CHECK_TRIGGER_THRESHOLD;
+
+// Utility: Calculate effective Awareness difference with special conditions
+export const calculateEffectiveAwarenessDifference = (
+  attackerAwareness: number,
+  defenderAwareness: number
+): { difference: number; lowAwarenessRuleApplied: boolean } => {
+  const actualDifference = Math.abs(attackerAwareness - defenderAwareness);
+  
+  // Low Awareness Rule: Both < 10 → treat as 3-6 range
+  if (attackerAwareness < LOW_AWARENESS_THRESHOLD && 
+      defenderAwareness < LOW_AWARENESS_THRESHOLD) {
+    // Force difference into 3-6 range (use middle value)
+    const forcedDifference = Math.max(
+      LOW_AWARENESS_FORCED_DIFFERENCE_MIN,
+      Math.min(actualDifference, LOW_AWARENESS_FORCED_DIFFERENCE_MAX)
+    );
+    return { 
+      difference: forcedDifference < LOW_AWARENESS_FORCED_DIFFERENCE_MIN 
+        ? LOW_AWARENESS_FORCED_DIFFERENCE_MIN 
+        : forcedDifference,
+      lowAwarenessRuleApplied: true 
+    };
+  }
+  
+  return { difference: actualDifference, lowAwarenessRuleApplied: false };
+};
+
+// Utility: Check for Evasion Priority
+export const checkEvasionPriority = (
+  attackerAwareness: number,
+  defenderAwareness: number
+): { hasEvasion: boolean; evasionDriverId: 'attacker' | 'defender' | null } => {
+  const difference = Math.abs(attackerAwareness - defenderAwareness);
+  
+  if (difference >= EVASION_PRIORITY_THRESHOLD) {
+    return {
+      hasEvasion: true,
+      evasionDriverId: attackerAwareness > defenderAwareness ? 'attacker' : 'defender'
+    };
+  }
+  
+  return { hasEvasion: false, evasionDriverId: null };
+};
+
+// Utility: Apply evasion downgrade to outcome
+export const applyEvasionDowngrade = (
+  outcome: AwarenessOutcome,
+  hasEvasion: boolean
+): AwarenessOutcome => {
+  if (!hasEvasion) return outcome;
+  return EVASION_DOWNGRADE_MAP[outcome];
+};
+
+// Utility: Determine outcome based on Awareness difference
+export const determineAwarenessOutcomeCategory = (
+  difference: number
+): 'clean' | 'roll_3_to_6' | 'roll_7_plus' => {
+  if (difference <= 2) return 'clean';
+  if (difference <= 6) return 'roll_3_to_6';
+  return 'roll_7_plus';
+};
+
+// Utility: Resolve outcome from d6 roll
+export const resolveAwarenessD6Outcome = (
+  difference: number,
+  d6Roll: number
+): AwarenessOutcome => {
+  if (difference <= 2) return 'cleanRacing';
+  if (difference <= 6) return AWARENESS_OUTCOME_TABLE_3_TO_6[d6Roll];
+  return AWARENESS_OUTCOME_TABLE_7_PLUS[d6Roll];
+};
+
+// Utility: Resolve Position Shift based on Awareness comparison
+export const resolvePositionShift = (
+  attackerId: string,
+  defenderId: string,
+  attackerAwareness: number,
+  defenderAwareness: number
+): PositionShiftResolution => {
+  if (attackerAwareness > defenderAwareness) {
+    return {
+      result: 'attackerGainsPosition',
+      attackerAwareness,
+      defenderAwareness,
+      attackerPositionChange: 1,   // Gains one position
+      defenderPositionChange: -1,  // Loses one position
+    };
+  }
+  
+  // Defender has higher or equal Awareness
+  return {
+    result: 'defenderRetainsAndAttackerDrops',
+    attackerAwareness,
+    defenderAwareness,
+    attackerPositionChange: -1,  // Drops one additional position
+    defenderPositionChange: 0,   // Retains position
+  };
+};
+
+// Utility: Check if outcome requires damage handoff
+export const requiresDamageHandoff = (
+  outcome: AwarenessOutcome
+): outcome is 'minorDamage' | 'majorDamage' | 'dnf' => {
+  return outcome === 'minorDamage' || outcome === 'majorDamage' || outcome === 'dnf';
+};
+
+// Utility: Map Awareness outcome to Damage state for handoff
+export const mapAwarenessOutcomeToDamageState = (
+  outcome: 'minorDamage' | 'majorDamage' | 'dnf'
+): Exclude<DamageState, 'none'> => {
+  switch (outcome) {
+    case 'minorDamage': return 'minor';
+    case 'majorDamage': return 'major';
+    case 'dnf': return 'dnf';
+  }
+};
+
+// ============================================
 // TIRE SYSTEM
 // ============================================
 
