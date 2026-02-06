@@ -627,7 +627,9 @@ export const isTyreDead = (
 //    - Check forced pit conditions
 //    - DM declares voluntary pits
 //    - Resolve pit stops (atomic, no dice)
-// 2. Opportunity Selection (dX roll)
+// 2. Opportunity Selection (FIXED 2 per lap, each resolved via d(driverCount))
+//    - Roll of 1 = no valid overtake (P1 cannot overtake)
+//    - Roll of N = driver in position N receives the opportunity
 // 3. Intent Declaration Phase (DM manual)
 // 4. Overtake/Defense rolls (d20 + modifiers)
 // 5. Awareness check (if triggered)
@@ -1037,10 +1039,58 @@ export const resolveIntentDeclaration = (
 };
 
 // Resolution flow with intent declaration:
-// 1. Opportunity Selection (dX roll)
-// 2. Intent Declaration Phase (DM manual - NEW)
+// 1. Opportunity Selection (FIXED 2 per lap, each via d(driverCount))
+//    - Roll of 1 = no valid overtake (P1 cannot overtake)
+//    - Roll of N = driver in position N receives the opportunity
+// 2. Intent Declaration Phase (DM manual)
 //    - If defenderYields or attackerForfeits → skip to step 6
 // 3. Overtake/Defense rolls (d20 + modifiers)
 // 4. Awareness check (if triggered)
 // 5. Damage resolution (if applicable)
 // 6. Tire & pit stop checks
+
+// ============================================
+// OVERTAKE OPPORTUNITY SYSTEM
+// ============================================
+
+// Fixed number of overtake opportunities per lap (may be modified by track traits later)
+export const OVERTAKE_OPPORTUNITIES_PER_LAP = 2 as const;
+
+// Opportunity selection: roll d(driverCount) for each opportunity
+// - Roll of 1: No valid overtake (P1 cannot attack forward)
+// - Roll of N: Driver in position N receives the opportunity to overtake the driver ahead
+
+export interface OvertakeOpportunityRoll {
+  opportunityIndex: number;       // 1 or 2 (which of the two opportunities)
+  diceResult: DiceResult;         // d(driverCount) roll
+  selectedPosition: number;       // The rolled position number
+  isValid: boolean;               // false if roll === 1 (P1 cannot overtake)
+  attackerDriverId: string | null; // null if invalid
+  defenderDriverId: string | null; // null if invalid (driver ahead of attacker)
+}
+
+// Utility: Resolve an opportunity selection roll
+export const resolveOpportunityRoll = (
+  diceResult: DiceResult,
+  opportunityIndex: number,
+  standings: { position: number; driverId: string }[]
+): OvertakeOpportunityRoll => {
+  const rolledPosition = diceResult.roll;
+  const isValid = rolledPosition > 1; // P1 cannot overtake
+
+  const attacker = isValid
+    ? standings.find(s => s.position === rolledPosition) ?? null
+    : null;
+  const defender = attacker
+    ? standings.find(s => s.position === rolledPosition - 1) ?? null
+    : null;
+
+  return {
+    opportunityIndex,
+    diceResult,
+    selectedPosition: rolledPosition,
+    isValid,
+    attackerDriverId: attacker?.driverId ?? null,
+    defenderDriverId: defender?.driverId ?? null,
+  };
+};
