@@ -1,73 +1,61 @@
-# Welcome to your Lovable project
+# Vite + React + TypeScript App
 
-## Project info
+This is a simple project built with **Vite**, **React**, and **TypeScript**.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+##  Getting Started
 
-## How can I edit this code?
+You can run this project using **npm** or **Bun**.
 
-There are several ways of editing your application.
+### Option 1: Using npm
 
-**Use Lovable**
+Make sure you have Node.js (v18 or higher) installed.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+type this into the terminal
 
-Changes made via Lovable will be committed automatically to this repo.
 
-**Use your preferred IDE**
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```bash
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Option 2: Using Bun
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+If you have Bun installed:
 
-**Use GitHub Codespaces**
+```bash
+bun install
+bun run dev
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+After starting the development server, open your browser and go to:
 
-## What technologies are used for this project?
+```
+http://localhost:5173
+```
 
-This project is built with:
+(Vite will show the correct URL in the terminal if a different port is used.)
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+---
 
-## How can I deploy this project?
+## 📦 Available Scripts
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+* `npm run dev` – Start the development server
+* `npm run build` – Build the app for production
+* `npm run preview` – Preview the production build
+* `npm run lint` – Run ESLint
+* `npm run test` – Run tests
 
-## Can I connect a custom domain to my Lovable project?
+---
 
-Yes, you can!
+## 🛠 Requirements
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+* Node.js (v18 or higher)
+  or
+* Bun
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+---
+
+
