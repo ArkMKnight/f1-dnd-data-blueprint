@@ -30,7 +30,6 @@ import {
   determineRaceFlag,
 } from '@/types/game';
 import { statToModifier, getModifiedDriverStat } from './track-compatibility';
-import { getCarForTeam } from './data';
 
 // ============================================
 // RACE STATE
@@ -88,8 +87,10 @@ export const initializeRace = (
   cars: Car[],
   startingCompound: TyreCompound = 'medium'
 ): RaceState => {
+  // Guard: only include drivers that have a car (avoids deleted team/driver references)
+  const driversWithCars = drivers.filter(d => cars.some(c => c.teamId === d.teamId));
   // Starting grid based on qualifying simulation (simplified: sort by qualifying modifier)
-  const sorted = [...drivers].sort((a, b) => {
+  const sorted = [...driversWithCars].sort((a, b) => {
     const carA = cars.find(c => c.teamId === a.teamId);
     const carB = cars.find(c => c.teamId === b.teamId);
     const modA = carA ? getModifiedDriverStat(a, 'qualifying', carA, track) : statToModifier(a.qualifying);
@@ -109,7 +110,7 @@ export const initializeRace = (
 
   return {
     track,
-    drivers,
+    drivers: driversWithCars,
     cars,
     currentLap: 0,
     totalLaps: track.lapCount,

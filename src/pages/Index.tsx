@@ -1,17 +1,44 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DRIVERS, CARS, TEAMS, TRACKS } from '@/lib/simulation/data';
-import { statToModifier, getModifiedDriverStat, getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
+import { TRACKS } from '@/lib/simulation/data';
+import { buildCarFromTeam, getCarsForDrivers } from '@/lib/simulation/data';
+import { statToModifier, getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
+import { useData } from '@/context/DataContext';
 import { GMModePanel } from '@/components/GMModePanel';
 import { AutoSimPanel } from '@/components/AutoSimPanel';
+import { DriverSelectionPanel } from '@/components/DriverSelectionPanel';
 
 const Index = () => {
   const [selectedTrackId, setSelectedTrackId] = useState(TRACKS[0].id);
+  const { teams, drivers, getTeamById, getDriverById, selectedRaceDriverIds, setSelectedRaceDriverIds } = useData();
   const track = TRACKS.find(t => t.id === selectedTrackId)!;
+
+  // Cars for display: one per team (from team car stats)
+  const carsForDisplay = useMemo(
+    () => teams.map(buildCarFromTeam),
+    [teams]
+  );
+
+  // Race drivers and cars: only selected drivers and their teams' cars
+  const raceDrivers = useMemo(() => {
+    if (!selectedRaceDriverIds || selectedRaceDriverIds.length === 0) return [];
+    return selectedRaceDriverIds
+      .map(id => getDriverById(id))
+      .filter((d): d is NonNullable<typeof d> => d != null);
+  }, [selectedRaceDriverIds, getDriverById]);
+
+  const raceCars = useMemo(
+    () => getCarsForDrivers(teams, raceDrivers),
+    [teams, raceDrivers]
+  );
+
+  const showDriverSelection = selectedRaceDriverIds === null;
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6 max-w-6xl mx-auto">
@@ -19,16 +46,24 @@ const Index = () => {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold tracking-tight">F1 × DnD Race Simulator</h1>
-          <Select value={selectedTrackId} onValueChange={setSelectedTrackId}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TRACKS.map(t => (
-                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/teams">Teams</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/drivers">Drivers</Link>
+            </Button>
+            <Select value={selectedTrackId} onValueChange={setSelectedTrackId}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TRACKS.map(t => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Track info */}
@@ -70,9 +105,9 @@ const Index = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {DRIVERS.map(driver => {
-                      const team = TEAMS.find(t => t.id === driver.teamId);
-                      const car = CARS.find(c => c.teamId === driver.teamId);
+                    {drivers.map(driver => {
+                      const team = getTeamById(driver.teamId);
+                      const car = team ? buildCarFromTeam(team) : null;
                       const carMod = car ? getTrackCompatibilityModifier(car, track) : 0;
                       return (
                         <TableRow key={driver.id}>
@@ -128,8 +163,8 @@ const Index = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {CARS.map(car => {
-                      const team = TEAMS.find(t => t.id === car.teamId);
+                    {carsForDisplay.map(car => {
+                      const team = getTeamById(car.teamId);
                       const score = getTrackMatchScore(car, track);
                       const mod = getTrackCompatibilityModifier(car, track);
                       return (
@@ -158,13 +193,45 @@ const Index = () => {
           </TabsContent>
 
           {/* Auto Sim tab */}
-          <TabsContent value="auto">
-            <AutoSimPanel track={track} drivers={DRIVERS} cars={CARS} />
+          <TabsContent value="auto" className="space-y-4">
+            {showDriverSelection ? (
+              <DriverSelectionPanel
+                teams={teams}
+                drivers={drivers}
+                onConfirm={ids => setSelectedRaceDriverIds(ids)}
+              />
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Racing with {raceDrivers.length} driver(s).</span>
+                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setSelectedRaceDriverIds(null)}>
+                    Change selection
+                  </Button>
+                </div>
+                <AutoSimPanel track={track} drivers={raceDrivers} cars={raceCars} teams={teams} />
+              </>
+            )}
           </TabsContent>
 
           {/* GM Mode tab */}
-          <TabsContent value="gm">
-            <GMModePanel key={selectedTrackId} track={track} drivers={DRIVERS} cars={CARS} />
+          <TabsContent value="gm" className="space-y-4">
+            {showDriverSelection ? (
+              <DriverSelectionPanel
+                teams={teams}
+                drivers={drivers}
+                onConfirm={ids => setSelectedRaceDriverIds(ids)}
+              />
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Racing with {raceDrivers.length} driver(s).</span>
+                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setSelectedRaceDriverIds(null)}>
+                    Change selection
+                  </Button>
+                </div>
+                <GMModePanel key={selectedTrackId} track={track} drivers={raceDrivers} cars={raceCars} />
+              </>
+            )}
           </TabsContent>
         </Tabs>
       </div>

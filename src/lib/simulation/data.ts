@@ -16,44 +16,53 @@ export const TRACK_COMPATIBILITY_TABLE: TrackCompatibilityEntry[] = [
 ];
 
 // ============================================
-// TEAMS
+// BUILD CAR FROM TEAM (for race engine)
 // ============================================
 
-export const TEAMS: Team[] = [
-  { id: 't1', name: 'Red Bull Racing', driverIds: ['d1', 'd2'], carId: 'c1' },
-  { id: 't2', name: 'Mercedes', driverIds: ['d3', 'd4'], carId: 'c2' },
-  { id: 't3', name: 'Ferrari', driverIds: ['d5', 'd6'], carId: 'c3' },
-  { id: 't4', name: 'McLaren', driverIds: ['d7', 'd8'], carId: 'c4' },
-  { id: 't5', name: 'Aston Martin', driverIds: ['d9', 'd10'], carId: 'c5' },
+export function buildCarFromTeam(team: Team): Car {
+  return {
+    id: `${team.id}-car`,
+    teamId: team.id,
+    lowSpeedCornering: team.lowSpeedCornering,
+    mediumSpeedCornering: team.mediumSpeedCornering,
+    highSpeedCornering: team.highSpeedCornering,
+    topSpeed: team.topSpeed,
+    acceleration: team.acceleration,
+  };
+}
+
+/** Build Car[] for race engine from teams that have at least one of the given drivers. */
+export function getCarsForDrivers(teams: Team[], drivers: Driver[]): Car[] {
+  const teamIds = [...new Set(drivers.map(d => d.teamId))];
+  return teamIds
+    .map(tid => teams.find(t => t.id === tid))
+    .filter((t): t is Team => t != null)
+    .map(buildCarFromTeam);
+}
+
+// ============================================
+// SEED DATA (initial teams & drivers for store)
+// ============================================
+
+export const INITIAL_TEAMS: Team[] = [
+  { id: 't1', name: 'Red Bull Racing', teamPrincipal: 'Christian Horner', primaryColor: '#0600EF', secondaryColor: '#FFD700', lowSpeedCornering: 150, mediumSpeedCornering: 160, highSpeedCornering: 170, topSpeed: 175, acceleration: 165, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't2', name: 'Mercedes', teamPrincipal: 'Toto Wolff', primaryColor: '#00D2BE', secondaryColor: '#000000', lowSpeedCornering: 145, mediumSpeedCornering: 155, highSpeedCornering: 165, topSpeed: 170, acceleration: 160, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't3', name: 'Ferrari', teamPrincipal: 'Frédéric Vasseur', primaryColor: '#DC0000', secondaryColor: '#FFFFFF', lowSpeedCornering: 155, mediumSpeedCornering: 150, highSpeedCornering: 160, topSpeed: 165, acceleration: 155, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't4', name: 'McLaren', teamPrincipal: 'Andrea Stella', primaryColor: '#FF8700', secondaryColor: '#000000', lowSpeedCornering: 140, mediumSpeedCornering: 155, highSpeedCornering: 160, topSpeed: 170, acceleration: 155, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't5', name: 'Aston Martin', teamPrincipal: 'Mike Krack', primaryColor: '#006F62', secondaryColor: '#C0C0C0', lowSpeedCornering: 135, mediumSpeedCornering: 140, highSpeedCornering: 145, topSpeed: 155, acceleration: 140, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
 ];
 
-// ============================================
-// DRIVERS
-// ============================================
-
-export const DRIVERS: Driver[] = [
-  { id: 'd1', name: 'Max Verstappen', teamId: 't1', pace: 19, qualifying: 19, racecraft: 18, awareness: 16, adaptability: 18 },
-  { id: 'd2', name: 'Sergio Perez', teamId: 't1', pace: 14, qualifying: 13, racecraft: 15, awareness: 13, adaptability: 12 },
-  { id: 'd3', name: 'Lewis Hamilton', teamId: 't2', pace: 18, qualifying: 17, racecraft: 19, awareness: 17, adaptability: 17 },
-  { id: 'd4', name: 'George Russell', teamId: 't2', pace: 16, qualifying: 18, racecraft: 15, awareness: 14, adaptability: 15 },
-  { id: 'd5', name: 'Charles Leclerc', teamId: 't3', pace: 17, qualifying: 19, racecraft: 16, awareness: 13, adaptability: 14 },
-  { id: 'd6', name: 'Carlos Sainz', teamId: 't3', pace: 16, qualifying: 16, racecraft: 16, awareness: 15, adaptability: 15 },
-  { id: 'd7', name: 'Lando Norris', teamId: 't4', pace: 17, qualifying: 18, racecraft: 16, awareness: 14, adaptability: 16 },
-  { id: 'd8', name: 'Oscar Piastri', teamId: 't4', pace: 15, qualifying: 16, racecraft: 14, awareness: 13, adaptability: 14 },
-  { id: 'd9', name: 'Fernando Alonso', teamId: 't5', pace: 16, qualifying: 15, racecraft: 18, awareness: 17, adaptability: 17 },
-  { id: 'd10', name: 'Lance Stroll', teamId: 't5', pace: 12, qualifying: 12, racecraft: 12, awareness: 11, adaptability: 11 },
-];
-
-// ============================================
-// CARS
-// ============================================
-
-export const CARS: Car[] = [
-  { id: 'c1', teamId: 't1', lowSpeedCornering: 150, mediumSpeedCornering: 160, highSpeedCornering: 170, topSpeed: 175, acceleration: 165 },
-  { id: 'c2', teamId: 't2', lowSpeedCornering: 145, mediumSpeedCornering: 155, highSpeedCornering: 165, topSpeed: 170, acceleration: 160 },
-  { id: 'c3', teamId: 't3', lowSpeedCornering: 155, mediumSpeedCornering: 150, highSpeedCornering: 160, topSpeed: 165, acceleration: 155 },
-  { id: 'c4', teamId: 't4', lowSpeedCornering: 140, mediumSpeedCornering: 155, highSpeedCornering: 160, topSpeed: 170, acceleration: 155 },
-  { id: 'c5', teamId: 't5', lowSpeedCornering: 135, mediumSpeedCornering: 140, highSpeedCornering: 145, topSpeed: 155, acceleration: 140 },
+export const INITIAL_DRIVERS: Driver[] = [
+  { id: 'd1', name: 'Max Verstappen', teamId: 't1', number: 1, nationality: 'Dutch', age: 27, pace: 19, qualifying: 19, racecraft: 18, awareness: 16, adaptability: 18 },
+  { id: 'd2', name: 'Sergio Perez', teamId: 't1', number: 11, nationality: 'Mexican', age: 34, pace: 14, qualifying: 13, racecraft: 15, awareness: 13, adaptability: 12 },
+  { id: 'd3', name: 'Lewis Hamilton', teamId: 't2', number: 44, nationality: 'British', age: 39, pace: 18, qualifying: 17, racecraft: 19, awareness: 17, adaptability: 17 },
+  { id: 'd4', name: 'George Russell', teamId: 't2', number: 63, nationality: 'British', age: 26, pace: 16, qualifying: 18, racecraft: 15, awareness: 14, adaptability: 15 },
+  { id: 'd5', name: 'Charles Leclerc', teamId: 't3', number: 16, nationality: 'Monegasque', age: 26, pace: 17, qualifying: 19, racecraft: 16, awareness: 13, adaptability: 14 },
+  { id: 'd6', name: 'Carlos Sainz', teamId: 't3', number: 55, nationality: 'Spanish', age: 29, pace: 16, qualifying: 16, racecraft: 16, awareness: 15, adaptability: 15 },
+  { id: 'd7', name: 'Lando Norris', teamId: 't4', number: 4, nationality: 'British', age: 24, pace: 17, qualifying: 18, racecraft: 16, awareness: 14, adaptability: 16 },
+  { id: 'd8', name: 'Oscar Piastri', teamId: 't4', number: 81, nationality: 'Australian', age: 23, pace: 15, qualifying: 16, racecraft: 14, awareness: 13, adaptability: 14 },
+  { id: 'd9', name: 'Fernando Alonso', teamId: 't5', number: 14, nationality: 'Spanish', age: 42, pace: 16, qualifying: 15, racecraft: 18, awareness: 17, adaptability: 17 },
+  { id: 'd10', name: 'Lance Stroll', teamId: 't5', number: 18, nationality: 'Canadian', age: 25, pace: 12, qualifying: 12, racecraft: 12, awareness: 11, adaptability: 11 },
 ];
 
 // ============================================
@@ -107,9 +116,5 @@ export const TRACKS: Track[] = [
   },
 ];
 
-// Lookup helpers
-export const getDriver = (id: string) => DRIVERS.find(d => d.id === id);
-export const getTeam = (id: string) => TEAMS.find(t => t.id === id);
-export const getCar = (id: string) => CARS.find(c => c.id === id);
-export const getCarForTeam = (teamId: string) => CARS.find(c => c.teamId === teamId);
+// Lookup helpers (track is static; drivers/teams come from store)
 export const getTrack = (id: string) => TRACKS.find(t => t.id === id);

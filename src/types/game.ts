@@ -47,11 +47,18 @@ export interface Driver {
   id: string;
   name: string;
   teamId: string;
+  number: number;
+  nationality: string;
+  age?: number;
   pace: number;         // 1-20
   qualifying: number;   // 1-20
   racecraft: number;    // 1-20
   awareness: number;    // 1-20
   adaptability: number; // 1-20
+  paceModifier?: number;
+  racecraftModifier?: number;
+  qualifyingModifier?: number;
+  trait?: string | null;
 }
 
 export interface Car {
@@ -67,8 +74,18 @@ export interface Car {
 export interface Team {
   id: string;
   name: string;
-  driverIds: string[];
-  carId: string;
+  teamPrincipal?: string;
+  primaryColor: string;   // hex
+  secondaryColor?: string; // hex
+  lowSpeedCornering: number;
+  mediumSpeedCornering: number;
+  highSpeedCornering: number;
+  acceleration: number;
+  topSpeed: number;
+  paceModifier: number;
+  racecraftModifier: number;
+  qualifyingModifier: number;
+  trait?: string | null;
 }
 
 export interface Trait {

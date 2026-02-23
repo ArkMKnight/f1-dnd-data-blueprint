@@ -66,7 +66,18 @@ const GMModePanelComponent = ({ track, drivers, cars }: GMModePanelProps) => {
           <p className="text-sm text-muted-foreground">
             Track: <span className="font-medium text-foreground">{track.name}</span> · {track.lapCount} laps · {drivers.length} drivers
           </p>
-          <Button onClick={startRace} className="w-full">Start Race</Button>
+          <Button
+            onClick={startRace}
+            className="w-full"
+            disabled={drivers.length === 0}
+          >
+            Start Race
+          </Button>
+          {drivers.length === 0 && (
+            <p className="text-xs text-destructive">
+              Select at least one driver before starting a race.
+            </p>
+          )}
         </CardContent>
       </Card>
     );

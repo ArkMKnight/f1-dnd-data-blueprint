@@ -3,18 +3,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Driver, Car, Track } from '@/types/game';
+import type { Driver, Car, Track, Team } from '@/types/game';
 import { simulateFullRace, type RaceState } from '@/lib/simulation/race-engine';
-import { getTrackMatchScore, getTrackCompatibilityModifier, statToModifier } from '@/lib/simulation/track-compatibility';
-import { getCarForTeam, TEAMS } from '@/lib/simulation/data';
+import { getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
 
 interface AutoSimPanelProps {
   track: Track;
   drivers: Driver[];
   cars: Car[];
+  teams: Team[];
 }
 
-const AutoSimPanelComponent = ({ track, drivers, cars }: AutoSimPanelProps) => {
+const AutoSimPanelComponent = ({ track, drivers, cars, teams }: AutoSimPanelProps) => {
   const [result, setResult] = useState<RaceState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
@@ -34,7 +34,7 @@ const AutoSimPanelComponent = ({ track, drivers, cars }: AutoSimPanelProps) => {
         <CardHeader className="py-3">
           <CardTitle className="text-sm flex items-center justify-between">
             <span>⚡ Auto Simulation — {track.name}</span>
-            <Button size="sm" onClick={runSim} disabled={isRunning}>
+            <Button size="sm" onClick={runSim} disabled={isRunning || drivers.length === 0}>
               {isRunning ? 'Simulating…' : result ? 'Re-run' : 'Run Simulation'}
             </Button>
           </CardTitle>
@@ -42,7 +42,7 @@ const AutoSimPanelComponent = ({ track, drivers, cars }: AutoSimPanelProps) => {
         <CardContent>
           {/* Track compatibility overview */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
-            {TEAMS.map(team => {
+            {teams.map(team => {
               const car = cars.find(c => c.teamId === team.id);
               if (!car) return null;
               const score = getTrackMatchScore(car, track);
@@ -73,7 +73,7 @@ const AutoSimPanelComponent = ({ track, drivers, cars }: AutoSimPanelProps) => {
                   .sort((a, b) => a.position - b.position)
                   .map((s, i) => {
                     const driver = drivers.find(d => d.id === s.driverId);
-                    const team = TEAMS.find(t => t.id === driver?.teamId);
+                    const team = teams.find(t => t.id === driver?.teamId);
                     return (
                       <div key={s.driverId} className="flex items-center justify-between px-4 py-2 text-sm">
                         <div className="flex items-center gap-2">
