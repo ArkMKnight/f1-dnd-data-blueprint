@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import type { Driver, Team } from '@/types/game';
+import type { Driver, Team, RaceConfig } from '@/types/game';
 import { INITIAL_DRIVERS, INITIAL_TEAMS } from '@/lib/simulation/data';
 
 type DataContextValue = {
@@ -7,6 +7,8 @@ type DataContextValue = {
   drivers: Driver[];
   selectedRaceDriverIds: string[] | null;
   setSelectedRaceDriverIds: (value: string[] | null | ((prev: string[] | null) => string[] | null)) => void;
+  raceConfig: RaceConfig | null;
+  setRaceConfig: (value: RaceConfig | null | ((prev: RaceConfig | null) => RaceConfig | null)) => void;
   addTeam: (team: Omit<Team, 'id'>) => Team;
   updateTeam: (id: string, patch: Partial<Omit<Team, 'id'>>) => void;
   deleteTeam: (id: string) => { ok: true } | { ok: false; reason: string };
@@ -33,6 +35,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [teams, setTeams] = useState<Team[]>(() => [...INITIAL_TEAMS]);
   const [drivers, setDrivers] = useState<Driver[]>(() => [...INITIAL_DRIVERS]);
   const [selectedRaceDriverIds, setSelectedRaceDriverIds] = useState<string[] | null>(null);
+   const [raceConfig, setRaceConfig] = useState<RaceConfig | null>(null);
 
   const getTeamById = useCallback(
     (id: string) => teams.find(t => t.id === id),
@@ -102,6 +105,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       drivers,
       selectedRaceDriverIds,
       setSelectedRaceDriverIds,
+      raceConfig,
+      setRaceConfig,
       addTeam,
       updateTeam,
       deleteTeam,
@@ -116,6 +121,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       teams,
       drivers,
       selectedRaceDriverIds,
+      raceConfig,
       addTeam,
       updateTeam,
       deleteTeam,

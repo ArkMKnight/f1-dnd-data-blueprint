@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +16,16 @@ import { DriverSelectionPanel } from '@/components/DriverSelectionPanel';
 
 const Index = () => {
   const [selectedTrackId, setSelectedTrackId] = useState(TRACKS[0].id);
-  const { teams, drivers, getTeamById, getDriverById, selectedRaceDriverIds, setSelectedRaceDriverIds } = useData();
+  const {
+    teams,
+    drivers,
+    getTeamById,
+    getDriverById,
+    selectedRaceDriverIds,
+    setSelectedRaceDriverIds,
+    raceConfig,
+    setRaceConfig,
+  } = useData();
   const track = TRACKS.find(t => t.id === selectedTrackId)!;
 
   // Cars for display: one per team (from team car stats)
@@ -39,6 +48,25 @@ const Index = () => {
   );
 
   const showDriverSelection = selectedRaceDriverIds === null;
+
+  // Keep RaceConfig in sync with current track & selected drivers.
+  useEffect(() => {
+    setRaceConfig(prev => {
+      // If track changed or no existing config, reset to track default laps.
+      if (!prev || prev.trackId !== selectedTrackId) {
+        return {
+          trackId: selectedTrackId,
+          selectedDrivers: selectedRaceDriverIds ?? [],
+          lapCount: track.lapCount,
+        };
+      }
+      // Same track: preserve custom lap count, update selected drivers.
+      return {
+        ...prev,
+        selectedDrivers: selectedRaceDriverIds ?? prev.selectedDrivers,
+      };
+    });
+  }, [selectedTrackId, selectedRaceDriverIds, setRaceConfig, track.lapCount]);
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6 max-w-6xl mx-auto">
@@ -208,7 +236,14 @@ const Index = () => {
                     Change selection
                   </Button>
                 </div>
-                <AutoSimPanel track={track} drivers={raceDrivers} cars={raceCars} teams={teams} />
+                <AutoSimPanel
+                  track={track}
+                  drivers={raceDrivers}
+                  cars={raceCars}
+                  teams={teams}
+                  raceConfig={raceConfig}
+                  setRaceConfig={setRaceConfig}
+                />
               </>
             )}
           </TabsContent>
@@ -229,7 +264,15 @@ const Index = () => {
                     Change selection
                   </Button>
                 </div>
-                <GMModePanel key={selectedTrackId} track={track} drivers={raceDrivers} cars={raceCars} />
+                <GMModePanel
+                  key={selectedTrackId}
+                  track={track}
+                  drivers={raceDrivers}
+                  cars={raceCars}
+                  teams={teams}
+                  raceConfig={raceConfig}
+                  setRaceConfig={setRaceConfig}
+                />
               </>
             )}
           </TabsContent>

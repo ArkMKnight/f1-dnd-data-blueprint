@@ -1,7 +1,17 @@
 import type {
-  Driver, Car, Track, DiceResult, DiceRequest, TyreCompound,
-  DriverTyreState, DriverDamageState, AwarenessCheckResult, AwarenessOutcome,
-  OvertakeOpportunityRoll, IntentDeclaration,
+  Driver,
+  Car,
+  Track,
+  DiceResult,
+  DiceRequest,
+  TyreCompound,
+  DriverTyreState,
+  DriverDamageState,
+  AwarenessCheckResult,
+  AwarenessOutcome,
+  OvertakeOpportunityRoll,
+  IntentDeclaration,
+  RaceEvent,
 } from '@/types/game';
 import {
   OVERTAKE_OPPORTUNITIES_PER_LAP,
@@ -52,12 +62,13 @@ export interface RaceState {
   currentLap: number;
   totalLaps: number;
   standings: DriverRaceState[];
-  eventLog: RaceEvent[];
+  eventLog: RaceLogEvent[];
+  liveEvents: RaceEvent[];
   raceFlag: 'green' | 'safetyCar' | 'redFlag';
   isComplete: boolean;
 }
 
-export interface RaceEvent {
+export interface RaceLogEvent {
   lap: number;
   type: string;
   description: string;
@@ -85,7 +96,8 @@ export const initializeRace = (
   track: Track,
   drivers: Driver[],
   cars: Car[],
-  startingCompound: TyreCompound = 'medium'
+  startingCompound: TyreCompound = 'medium',
+  totalLapsOverride?: number
 ): RaceState => {
   // Guard: only include drivers that have a car (avoids deleted team/driver references)
   const driversWithCars = drivers.filter(d => cars.some(c => c.teamId === d.teamId));
@@ -113,12 +125,31 @@ export const initializeRace = (
     drivers: driversWithCars,
     cars,
     currentLap: 0,
-    totalLaps: track.lapCount,
+    totalLaps: totalLapsOverride ?? track.lapCount,
     standings,
     eventLog: [],
+    liveEvents: [],
     raceFlag: 'green',
     isComplete: false,
   };
+};
+
+const MAX_LIVE_EVENTS = 50;
+
+export const appendLiveRaceEvent = (
+  state: RaceState,
+  payload: Omit<RaceEvent, 'id' | 'timestamp'>
+): void => {
+  const baseEvents = state.liveEvents ?? [];
+  const nextEvent: RaceEvent = {
+    id: `${state.currentLap}-${payload.primaryDriverId}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`,
+    timestamp: Date.now(),
+    ...payload,
+  };
+  const next = [...baseEvents, nextEvent];
+  state.liveEvents = next.length > MAX_LIVE_EVENTS ? next.slice(-MAX_LIVE_EVENTS) : next;
 };
 
 // ============================================
@@ -126,7 +157,12 @@ export const initializeRace = (
 // ============================================
 
 export const simulateLap = (state: RaceState): RaceState => {
-  const newState = { ...state, currentLap: state.currentLap + 1, eventLog: [...state.eventLog] };
+  const newState: RaceState = {
+    ...state,
+    currentLap: state.currentLap + 1,
+    eventLog: [...state.eventLog],
+    liveEvents: state.liveEvents ? [...state.liveEvents] : [],
+  };
   const lap = newState.currentLap;
   let standings = newState.standings.map(s => ({ ...s }));
 
@@ -211,6 +247,22 @@ export const simulateLap = (state: RaceState): RaceState => {
       const dPos = defenderState.position;
       attackerState.position = dPos;
       defenderState.position = aPos;
+
+      appendLiveRaceEvent(newState, {
+        lapNumber: lap,
+        type: 'overtake',
+        description: `${attacker.name} overtakes ${defender.name}`,
+        primaryDriverId: attacker.id,
+        secondaryDriverId: defender.id,
+      });
+    } else {
+      appendLiveRaceEvent(newState, {
+        lapNumber: lap,
+        type: 'defense',
+        description: `${defender.name} successfully defends from ${attacker.name}`,
+        primaryDriverId: defender.id,
+        secondaryDriverId: attacker.id,
+      });
     }
 
     // 5. Awareness check
@@ -231,6 +283,16 @@ export const simulateLap = (state: RaceState): RaceState => {
           lap, type: 'awareness',
           description: `Awareness check (diff ${rollDiff}): d6(${d6.roll}) → ${finalOutcome}${hasEvasion ? ' (evasion applied)' : ''}`,
         });
+
+        if (finalOutcome !== 'cleanRacing') {
+          appendLiveRaceEvent(newState, {
+            lapNumber: lap,
+            type: 'incident',
+            description: `${defender.name} awareness incident (${finalOutcome})`,
+            primaryDriverId: defender.id,
+            secondaryDriverId: attacker.id,
+          });
+        }
 
         // Handle damage outcomes
         if (requiresDamageHandoff(finalOutcome)) {
@@ -303,9 +365,10 @@ export const simulateFullRace = (
   track: Track,
   drivers: Driver[],
   cars: Car[],
-  startingCompound: TyreCompound = 'medium'
+  startingCompound: TyreCompound = 'medium',
+  totalLapsOverride?: number
 ): RaceState => {
-  let state = initializeRace(track, drivers, cars, startingCompound);
+  let state = initializeRace(track, drivers, cars, startingCompound, totalLapsOverride);
   while (!state.isComplete) {
     state = simulateLap(state);
   }

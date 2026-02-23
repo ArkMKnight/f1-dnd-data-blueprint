@@ -1,7 +1,16 @@
 // GM Tabletop Engine — step-by-step race control
 // The GM manually advances through each phase of the resolution order
 
-import type { Driver, Car, Track, TyreCompound, DiceResult, OvertakeOpportunityRoll, OvertakeIntent } from '@/types/game';
+import type {
+  Driver,
+  Car,
+  Track,
+  TyreCompound,
+  DiceResult,
+  OvertakeOpportunityRoll,
+  OvertakeIntent,
+  RaceEvent,
+} from '@/types/game';
 import {
   OVERTAKE_OPPORTUNITIES_PER_LAP, resolveOpportunityRoll,
   shouldTriggerAwarenessCheck, calculateEffectiveAwarenessDifference,
@@ -12,8 +21,8 @@ import {
   resolveIntentDeclaration,
 } from '@/types/game';
 import { statToModifier, getModifiedDriverStat } from './track-compatibility';
-import type { DriverRaceState, RaceState, RaceEvent } from './race-engine';
-import { initializeRace } from './race-engine';
+import type { DriverRaceState, RaceState } from './race-engine';
+import { initializeRace, appendLiveRaceEvent } from './race-engine';
 
 // ============================================
 // GM PROMPT TYPES
@@ -53,9 +62,13 @@ export interface GMState {
 // ============================================
 
 export const initGMSession = (
-  track: Track, drivers: Driver[], cars: Car[], startingCompound: TyreCompound = 'medium'
+  track: Track,
+  drivers: Driver[],
+  cars: Car[],
+  startingCompound: TyreCompound = 'medium',
+  totalLapsOverride?: number
 ): GMState => ({
-  raceState: initializeRace(track, drivers, cars, startingCompound),
+  raceState: initializeRace(track, drivers, cars, startingCompound, totalLapsOverride),
   currentPhase: 'lap_start',
   currentOpportunityIndex: 0,
   currentOpportunity: null,
@@ -163,6 +176,15 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           race.eventLog.push({
             lap: race.currentLap, type: 'intent',
             description: `Defender yields — positions swapped`,
+          });
+          const attacker = race.drivers.find(d => d.id === opp.attackerDriverId)!;
+          const defender = race.drivers.find(d => d.id === opp.defenderDriverId)!;
+          appendLiveRaceEvent(race, {
+            lapNumber: race.currentLap,
+            type: 'overtake',
+            description: `${attacker.name} overtakes ${defender.name} (defender yields)`,
+            primaryDriverId: attacker.id,
+            secondaryDriverId: defender.id,
           });
         } else {
           race.eventLog.push({
@@ -311,6 +333,22 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
     const tmp = aState.position;
     aState.position = dState.position;
     dState.position = tmp;
+
+    appendLiveRaceEvent(race, {
+      lapNumber: race.currentLap,
+      type: 'overtake',
+      description: `${attacker.name} overtakes ${defender.name}`,
+      primaryDriverId: attacker.id,
+      secondaryDriverId: defender.id,
+    });
+  } else {
+    appendLiveRaceEvent(race, {
+      lapNumber: race.currentLap,
+      type: 'defense',
+      description: `${defender.name} successfully defends from ${attacker.name}`,
+      primaryDriverId: defender.id,
+      secondaryDriverId: attacker.id,
+    });
   }
 
   // Check awareness trigger
@@ -351,6 +389,16 @@ const resolveAwareness = (state: GMState, d6Roll: number): GMState => {
     lap: race.currentLap, type: 'awareness',
     description: `Awareness d6(${d6Roll}) → ${finalOutcome}${hasEvasion ? ' (evasion)' : ''}`,
   });
+
+  if (finalOutcome !== 'cleanRacing') {
+    appendLiveRaceEvent(race, {
+      lapNumber: race.currentLap,
+      type: 'incident',
+      description: `${defender.name} awareness incident (${finalOutcome})`,
+      primaryDriverId: defender.id,
+      secondaryDriverId: attacker.id,
+    });
+  }
 
   if (requiresDamageHandoff(finalOutcome)) {
     const damageType = mapAwarenessOutcomeToDamageState(finalOutcome);

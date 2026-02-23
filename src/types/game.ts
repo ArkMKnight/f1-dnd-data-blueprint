@@ -116,6 +116,32 @@ export interface Track {
   conditionalTraits: Trait[];
 }
 
+// ============================================
+// RACE CONFIGURATION
+// ============================================
+
+// Per-race configuration chosen in the setup flow.
+// - lapCount is always configurable per race
+// - track.lapCount acts as the default value
+export interface RaceConfig {
+  trackId: string;
+  selectedDrivers: string[]; // driver IDs included in this race
+  lapCount: number;
+}
+
+// Live race event feed model (UI-facing)
+export type RaceEventType = 'overtake' | 'defense' | 'incident';
+
+export interface RaceEvent {
+  id: string;
+  lapNumber: number;
+  type: RaceEventType;
+  description: string;
+  primaryDriverId: string;
+  secondaryDriverId?: string;
+  timestamp: number;
+}
+
 // Track-specific tyre degradation configuration
 export interface TyreCompoundConfig {
   effectiveLapRangeStart: number;  // First lap of optimal performance

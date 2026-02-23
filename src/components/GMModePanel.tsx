@@ -1,30 +1,86 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import type { Driver, Car, Track } from '@/types/game';
+import type { Driver, Car, Track, RaceConfig, Team } from '@/types/game';
 import { initGMSession, advanceGMState, type GMState } from '@/lib/simulation/gm-engine';
+import { DriverNameWithTeamColors } from '@/components/DriverNameWithTeamColors';
+import { LiveRaceEventFeed } from '@/components/LiveRaceEventFeed';
 
 interface GMModePanelProps {
   track: Track;
   drivers: Driver[];
   cars: Car[];
+  teams: Team[];
+  raceConfig: RaceConfig | null;
+  setRaceConfig: (value: RaceConfig | null | ((prev: RaceConfig | null) => RaceConfig | null)) => void;
 }
 
-const GMModePanelComponent = ({ track, drivers, cars }: GMModePanelProps) => {
+const MIN_LAPS = 1;
+const MAX_LAPS = 200;
+
+const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRaceConfig }: GMModePanelProps) => {
   const [gmState, setGmState] = useState<GMState | null>(null);
   const [rollInput, setRollInput] = useState('');
   const [isStarted, setIsStarted] = useState(false);
+  const [lapInput, setLapInput] = useState<string>(() => String(track.lapCount));
+  const [lapError, setLapError] = useState<string | null>(null);
+
+  const effectiveLapCount = useMemo(
+    () => (raceConfig && raceConfig.trackId === track.id ? raceConfig.lapCount : track.lapCount),
+    [raceConfig, track]
+  );
+
+  useEffect(() => {
+    setLapInput(String(effectiveLapCount));
+    setLapError(null);
+  }, [effectiveLapCount]);
+
+  const validateLapCount = useCallback((raw: string): { valid: boolean; value?: number; error?: string } => {
+    if (raw.trim() === '') {
+      return { valid: false, error: 'Lap count is required.' };
+    }
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed)) {
+      return { valid: false, error: 'Lap count must be an integer.' };
+    }
+    if (parsed < MIN_LAPS) {
+      return { valid: false, error: `Minimum is ${MIN_LAPS} lap.` };
+    }
+    if (parsed > MAX_LAPS) {
+      return { valid: false, error: `Maximum is ${MAX_LAPS} laps.` };
+    }
+    return { valid: true, value: parsed };
+  }, []);
 
   const startRace = useCallback(() => {
-    const session = initGMSession(track, drivers, cars);
+    const { valid, value, error } = validateLapCount(lapInput);
+    if (!valid || value === undefined) {
+      setLapError(error ?? 'Invalid lap count.');
+      return;
+    }
+    setLapError(null);
+
+    setRaceConfig(prev => {
+      const base: RaceConfig = prev && prev.trackId === track.id
+        ? { ...prev }
+        : {
+            trackId: track.id,
+            selectedDrivers: drivers.map(d => d.id),
+            lapCount: value,
+          };
+      base.lapCount = value;
+      base.selectedDrivers = drivers.map(d => d.id);
+      return base;
+    });
+
+    const session = initGMSession(track, drivers, cars, 'medium', value);
     const advanced = advanceGMState(session);
     setGmState(advanced);
     setIsStarted(true);
-  }, [track, drivers, cars]);
+  }, [cars, drivers, lapInput, setRaceConfig, track, validateLapCount]);
 
   const handleSubmitRoll = useCallback(() => {
     if (!gmState || !rollInput) return;
@@ -64,12 +120,36 @@ const GMModePanelComponent = ({ track, drivers, cars }: GMModePanelProps) => {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Track: <span className="font-medium text-foreground">{track.name}</span> · {track.lapCount} laps · {drivers.length} drivers
+            Track: <span className="font-medium text-foreground">{track.name}</span> · Default{' '}
+            <span className="font-mono">{track.lapCount}</span> laps · {drivers.length} drivers
           </p>
+          <div className="space-y-1 max-w-xs">
+            <label className="text-xs font-medium text-foreground" htmlFor="gm-lap-count">
+              Number of Laps
+            </label>
+            <Input
+              id="gm-lap-count"
+              type="number"
+              min={MIN_LAPS}
+              max={MAX_LAPS}
+              value={lapInput}
+              onChange={e => {
+                const next = e.target.value;
+                setLapInput(next);
+                const { valid, error } = validateLapCount(next);
+                setLapError(valid ? null : error ?? 'Invalid lap count.');
+              }}
+            />
+            {lapError && (
+              <p className="text-xs text-destructive">
+                {lapError}
+              </p>
+            )}
+          </div>
           <Button
             onClick={startRace}
             className="w-full"
-            disabled={drivers.length === 0}
+            disabled={drivers.length === 0 || !!lapError}
           >
             Start Race
           </Button>
@@ -111,13 +191,17 @@ const GMModePanelComponent = ({ track, drivers, cars }: GMModePanelProps) => {
               .sort((a, b) => a.position - b.position)
               .map(s => {
                 const driver = drivers.find(d => d.id === s.driverId);
+                const team = driver ? teams.find(t => t.id === driver.teamId) : null;
                 return (
                   <div key={s.driverId} className="flex items-center justify-between px-4 py-2 text-sm">
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold w-6 text-center">P{s.position}</span>
-                      <span className={s.isDNF ? 'line-through text-muted-foreground' : ''}>
-                        {driver?.name ?? s.driverId}
-                      </span>
+                      <DriverNameWithTeamColors
+                        driver={driver ?? null}
+                        team={team ?? null}
+                        nameFallback={s.driverId}
+                        nameClassName={s.isDNF ? 'line-through text-muted-foreground' : ''}
+                      />
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs">{s.tyreState.compound}</Badge>
@@ -133,6 +217,13 @@ const GMModePanelComponent = ({ track, drivers, cars }: GMModePanelProps) => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Live race event feed (above dice rolling section) */}
+      <LiveRaceEventFeed
+        events={race.liveEvents ?? []}
+        drivers={drivers}
+        teams={teams}
+      />
 
       {/* GM Prompt */}
       {prompt && !race.isComplete && (
