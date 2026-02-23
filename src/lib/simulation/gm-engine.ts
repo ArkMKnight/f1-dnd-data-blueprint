@@ -302,6 +302,8 @@ const moveToNextOpportunityOrEnd = (state: GMState): GMState => {
   return advanceGMState(state);
 };
 
+// Contested roll: only Pace + Racecraft modifiers are used (never Adaptability, Qualifying, or Awareness).
+// See docs/overtake-roll-modifiers.md for prompt-generator reference.
 const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRoll: number): GMState => {
   const race = state.raceState;
   const opp = state.currentOpportunity!;

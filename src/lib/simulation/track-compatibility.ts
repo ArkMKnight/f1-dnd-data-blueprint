@@ -3,10 +3,31 @@ import { calculateTrackCompatibility, isStatAffectedByTrackCompatibility } from 
 import { TRACK_COMPATIBILITY_TABLE } from './data';
 
 // ============================================
-// STAT MODIFIER FORMULA
+// STAT MODIFIER FORMULAS (per handout.txt)
 // ============================================
+// Only Pace and Racecraft use these tables for overtake/defence rolls.
+// Other stats (Qualifying, Awareness, Adaptability) use statToModifier for display/grid only.
 
-// Convert a 1-20 stat into a -5 to +5 modifier (D&D standard)
+/** Pace: 0-3=+0, 4-7=+1, 8-11=+2, 12-15=+3, 16-19=+4, 20=+5 */
+export const paceModifierFromStat = (stat: number): number => {
+  if (stat >= 20) return 5;
+  if (stat >= 16) return 4;
+  if (stat >= 12) return 3;
+  if (stat >= 8) return 2;
+  if (stat >= 4) return 1;
+  return 0;
+};
+
+/** Racecraft: 0-4=+0, 5-9=+1, 10-14=+2, 15-19=+3, 20=+4 */
+export const racecraftModifierFromStat = (stat: number): number => {
+  if (stat >= 20) return 4;
+  if (stat >= 15) return 3;
+  if (stat >= 10) return 2;
+  if (stat >= 5) return 1;
+  return 0;
+};
+
+/** Generic modifier for stats not used in overtake roll (Qualifying, Awareness, Adaptability). D&D-style for display/grid. */
 export const statToModifier = (stat: number): number => Math.floor((stat - 10) / 2);
 
 // ============================================
@@ -46,7 +67,12 @@ export const getModifiedDriverStat = (
   lookupTable: TrackCompatibilityEntry[] = TRACK_COMPATIBILITY_TABLE
 ): number => {
   const rawStat = driver[statName];
-  const baseMod = statToModifier(rawStat);
+  const baseMod =
+    statName === 'pace'
+      ? paceModifierFromStat(rawStat)
+      : statName === 'racecraft'
+        ? racecraftModifierFromStat(rawStat)
+        : statToModifier(rawStat);
 
   if (!isStatAffectedByTrackCompatibility(statName)) {
     return baseMod; // Awareness/Adaptability: no car modifier

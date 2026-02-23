@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TRACKS } from '@/lib/simulation/data';
 import { buildCarFromTeam, getCarsForDrivers } from '@/lib/simulation/data';
-import { statToModifier, getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
+import { paceModifierFromStat, racecraftModifierFromStat, getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
 import { useData } from '@/context/DataContext';
 import { GMModePanel } from '@/components/GMModePanel';
 import { AutoSimPanel } from '@/components/AutoSimPanel';
@@ -142,19 +142,19 @@ const Index = () => {
                           <TableCell className="font-medium">{driver.name}</TableCell>
                           <TableCell className="text-muted-foreground text-xs">{team?.name}</TableCell>
                           <TableCell className="text-center">
-                            <StatCell raw={driver.pace} mod={statToModifier(driver.pace)} carMod={carMod} affected />
+                            <StatCell raw={driver.pace} mod={paceModifierFromStat(driver.pace)} carMod={carMod} affected />
                           </TableCell>
                           <TableCell className="text-center">
-                            <StatCell raw={driver.qualifying} mod={statToModifier(driver.qualifying)} carMod={carMod} affected />
+                            <StatCell raw={driver.qualifying} mod={0} carMod={0} affected={false} showMod={false} />
                           </TableCell>
                           <TableCell className="text-center">
-                            <StatCell raw={driver.racecraft} mod={statToModifier(driver.racecraft)} carMod={carMod} affected />
+                            <StatCell raw={driver.racecraft} mod={racecraftModifierFromStat(driver.racecraft)} carMod={carMod} affected />
                           </TableCell>
                           <TableCell className="text-center">
-                            <StatCell raw={driver.awareness} mod={statToModifier(driver.awareness)} carMod={0} affected={false} />
+                            <StatCell raw={driver.awareness} mod={0} carMod={0} affected={false} showMod={false} />
                           </TableCell>
                           <TableCell className="text-center">
-                            <StatCell raw={driver.adaptability} mod={statToModifier(driver.adaptability)} carMod={0} affected={false} />
+                            <StatCell raw={driver.adaptability} mod={0} carMod={0} affected={false} showMod={false} />
                           </TableCell>
                           <TableCell className="text-center">
                             {car && (
@@ -282,8 +282,11 @@ const Index = () => {
   );
 };
 
-// Stat display helper
-const StatCell = ({ raw, mod, carMod, affected }: { raw: number; mod: number; carMod: number; affected: boolean }) => {
+// Stat display helper. Only Pace and Racecraft show modifiers (overtake roll); others show raw only.
+const StatCell = ({ raw, mod, carMod, affected, showMod = true }: { raw: number; mod: number; carMod: number; affected: boolean; showMod?: boolean }) => {
+  if (!showMod) {
+    return <div className="text-xs"><span className="font-mono">{raw}</span></div>;
+  }
   const totalMod = affected ? mod + carMod : mod;
   return (
     <div className="text-xs">

@@ -1,6 +1,6 @@
-# Vite + React + TypeScript App
+# F1 D&D Data Blueprint
 
-This is a simple project built with **Vite**, **React**, and **TypeScript**.
+
 
 ##  Getting Started
 
