@@ -58,6 +58,14 @@ export interface Driver {
   paceModifier?: number;
   racecraftModifier?: number;
   qualifyingModifier?: number;
+  /**
+   * Trait identifier (preferred).
+   * Kept separate from legacy `trait` to avoid breaking older saved data.
+   */
+  traitId?: string | null;
+  /**
+   * Legacy trait field (string id). UI should write to `traitId`.
+   */
   trait?: string | null;
 }
 
@@ -85,6 +93,14 @@ export interface Team {
   paceModifier: number;
   racecraftModifier: number;
   qualifyingModifier: number;
+  /**
+   * Trait identifier (preferred).
+   * Kept separate from legacy `trait` to avoid breaking older saved data.
+   */
+  traitId?: string | null;
+  /**
+   * Legacy trait field (string id). UI should write to `traitId`.
+   */
   trait?: string | null;
 }
 

@@ -38,6 +38,11 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     setLapError(null);
   }, [effectiveLapCount]);
 
+  const hasMissingTeamTrait = useMemo(
+    () => teams.some(team => !(team.traitId ?? team.trait)),
+    [teams]
+  );
+
   const validateLapCount = useCallback((raw: string): { valid: boolean; value?: number; error?: string } => {
     if (raw.trim() === '') {
       return { valid: false, error: 'Lap count is required.' };
@@ -94,7 +99,7 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
             <Button
               size="sm"
               onClick={runSim}
-              disabled={isRunning || drivers.length === 0 || !!lapError}
+              disabled={isRunning || drivers.length === 0 || !!lapError || hasMissingTeamTrait}
             >
               {isRunning ? 'Simulating…' : result ? 'Re-run' : 'Run Simulation'}
             </Button>
@@ -127,6 +132,11 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
               {lapError && (
                 <p className="text-xs text-destructive">
                   {lapError}
+                </p>
+              )}
+              {!lapError && hasMissingTeamTrait && (
+                <p className="text-xs text-destructive">
+                  All teams must have a trait selected before starting a race.
                 </p>
               )}
             </div>

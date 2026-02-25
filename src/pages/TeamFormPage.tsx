@@ -15,6 +15,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -27,6 +34,7 @@ import {
 import { useData } from '@/context/DataContext';
 import { useToast } from '@/hooks/use-toast';
 import type { Team } from '@/types/game';
+import { TRAIT_DEFINITIONS } from '@/lib/trait-definitions';
 
 const teamSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -41,7 +49,7 @@ const teamSchema = z.object({
   paceModifier: z.coerce.number(),
   racecraftModifier: z.coerce.number(),
   qualifyingModifier: z.coerce.number(),
-  trait: z.string().optional().nullable(),
+  traitId: z.string().min(1, 'Team trait is required'),
 });
 
 type TeamFormValues = z.infer<typeof teamSchema>;
@@ -61,7 +69,7 @@ function toFormValues(team: Team | null): TeamFormValues {
       paceModifier: 0,
       racecraftModifier: 0,
       qualifyingModifier: 0,
-      trait: '',
+      traitId: '',
     };
   }
   return {
@@ -77,7 +85,7 @@ function toFormValues(team: Team | null): TeamFormValues {
     paceModifier: team.paceModifier,
     racecraftModifier: team.racecraftModifier,
     qualifyingModifier: team.qualifyingModifier,
-    trait: team.trait ?? '',
+    traitId: team.traitId ?? team.trait ?? '',
   };
 }
 
@@ -114,7 +122,7 @@ export default function TeamFormPage() {
       paceModifier: values.paceModifier,
       racecraftModifier: values.racecraftModifier,
       qualifyingModifier: values.qualifyingModifier,
-      trait: values.trait || null,
+      traitId: values.traitId,
     };
 
     if (isEdit && id) {
@@ -271,13 +279,27 @@ export default function TeamFormPage() {
               </div>
               <FormField
                 control={form.control}
-                name="trait"
+                name="traitId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Trait (optional)</FormLabel>
-                    <FormControl>
-                      <Input {...field} value={field.value ?? ''} />
-                    </FormControl>
+                    <FormLabel>Trait (required)</FormLabel>
+                    <Select
+                      value={field.value ?? ''}
+                      onValueChange={val => field.onChange(val)}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select team trait" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {TRAIT_DEFINITIONS.filter(t => t.scope === 'team').map(trait => (
+                          <SelectItem key={trait.id} value={trait.id}>
+                            {trait.name} ({trait.category.charAt(0).toUpperCase() + trait.category.slice(1)})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}

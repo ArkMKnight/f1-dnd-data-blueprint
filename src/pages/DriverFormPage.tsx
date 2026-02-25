@@ -35,6 +35,7 @@ import { useData } from '@/context/DataContext';
 import { useToast } from '@/hooks/use-toast';
 import type { Driver } from '@/types/game';
 import { DRIVER_STAT_RANGE } from '@/types/game';
+import { TRAIT_DEFINITIONS } from '@/lib/trait-definitions';
 
 const statSchema = z.number().min(DRIVER_STAT_RANGE.min).max(DRIVER_STAT_RANGE.max);
 
@@ -52,7 +53,7 @@ const driverSchema = z.object({
   paceModifier: z.coerce.number().optional(),
   racecraftModifier: z.coerce.number().optional(),
   qualifyingModifier: z.coerce.number().optional(),
-  trait: z.string().optional().nullable(),
+  traitId: z.string().optional().nullable(),
 });
 
 type DriverFormValues = z.infer<typeof driverSchema>;
@@ -74,7 +75,7 @@ function toFormValues(driver: Driver | null, teams: { id: string }[]): DriverFor
       paceModifier: 0,
       racecraftModifier: 0,
       qualifyingModifier: 0,
-      trait: '',
+      traitId: null,
     };
   }
   return {
@@ -91,7 +92,7 @@ function toFormValues(driver: Driver | null, teams: { id: string }[]): DriverFor
     paceModifier: driver.paceModifier ?? 0,
     racecraftModifier: driver.racecraftModifier ?? 0,
     qualifyingModifier: driver.qualifyingModifier ?? 0,
-    trait: driver.trait ?? '',
+    traitId: driver.traitId ?? driver.trait ?? null,
   };
 }
 
@@ -133,7 +134,7 @@ export default function DriverFormPage() {
       paceModifier: values.paceModifier,
       racecraftModifier: values.racecraftModifier,
       qualifyingModifier: values.qualifyingModifier,
-      trait: values.trait || null,
+      traitId: values.traitId || null,
     };
 
     if (isEdit && id) {
@@ -323,16 +324,35 @@ export default function DriverFormPage() {
               </div>
               <FormField
                 control={form.control}
-                name="trait"
-                render={({ field }) => (
+                name="traitId"
+                render={({ field }) => {
+                  const NO_TRAIT = '__no_trait__';
+                  const value = field.value ?? NO_TRAIT;
+                  return (
                   <FormItem className="mt-4">
                     <FormLabel>Trait (optional)</FormLabel>
-                    <FormControl>
-                      <Input {...field} value={field.value ?? ''} />
-                    </FormControl>
+                    <Select
+                      value={value}
+                      onValueChange={val => field.onChange(val === NO_TRAIT ? null : val)}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="No Trait" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={NO_TRAIT}>No Trait</SelectItem>
+                        {TRAIT_DEFINITIONS.filter(t => t.scope === 'driver').map(trait => (
+                          <SelectItem key={trait.id} value={trait.id}>
+                            {trait.name} ({trait.category.charAt(0).toUpperCase() + trait.category.slice(1)})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
-                )}
+                  );
+                }}
               />
             </CardContent>
           </Card>

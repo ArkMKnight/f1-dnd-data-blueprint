@@ -32,8 +32,18 @@ function nextId(prefix: string, existing: { id: string }[]): string {
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [teams, setTeams] = useState<Team[]>(() => [...INITIAL_TEAMS]);
-  const [drivers, setDrivers] = useState<Driver[]>(() => [...INITIAL_DRIVERS]);
+  const [teams, setTeams] = useState<Team[]>(() =>
+    INITIAL_TEAMS.map(t => ({
+      ...t,
+      traitId: t.traitId ?? t.trait ?? null,
+    }))
+  );
+  const [drivers, setDrivers] = useState<Driver[]>(() =>
+    INITIAL_DRIVERS.map(d => ({
+      ...d,
+      traitId: d.traitId ?? d.trait ?? null,
+    }))
+  );
   const [selectedRaceDriverIds, setSelectedRaceDriverIds] = useState<string[] | null>(null);
    const [raceConfig, setRaceConfig] = useState<RaceConfig | null>(null);
 

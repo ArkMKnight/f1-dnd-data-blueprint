@@ -33,6 +33,11 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     [raceConfig, track]
   );
 
+  const hasMissingTeamTrait = useMemo(
+    () => teams.some(team => !(team.traitId ?? team.trait)),
+    [teams]
+  );
+
   useEffect(() => {
     setLapInput(String(effectiveLapCount));
     setLapError(null);
@@ -145,11 +150,16 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
                 {lapError}
               </p>
             )}
+            {!lapError && hasMissingTeamTrait && (
+              <p className="text-xs text-destructive">
+                All teams must have a trait selected before starting a race.
+              </p>
+            )}
           </div>
           <Button
             onClick={startRace}
             className="w-full"
-            disabled={drivers.length === 0 || !!lapError}
+            disabled={drivers.length === 0 || !!lapError || hasMissingTeamTrait}
           >
             Start Race
           </Button>
