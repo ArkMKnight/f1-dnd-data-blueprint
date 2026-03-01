@@ -83,6 +83,36 @@ export const initTraitRuntimeState = (
   };
 };
 
+/**
+ * Consume one use of an active trait (GM activation). Returns true if consumed.
+ * - Driver: power_unit_overdrive, race_intelligence (usesRemaining or usedThisHalf).
+ * - Team: reactive_suspension, flexible_strategy (usesRemaining).
+ */
+export const consumeTraitActivation = (
+  runtime: TraitRuntimeState,
+  traitId: string,
+  scope: 'driver' | 'team',
+  entityId: string
+): boolean => {
+  const def = TRAITS_BY_ID[traitId];
+  if (!def?.isEnabled || def.activationLimit == null) return false;
+
+  const bag = scope === 'driver' ? runtime.driverTraits : runtime.teamTraits;
+  const state = bag[entityId];
+  if (!state) return false;
+
+  if (traitId === 'race_intelligence') {
+    if (state.usedThisHalf) return false;
+    state.usedThisHalf = true;
+    if (state.usesRemaining != null) state.usesRemaining = Math.max(0, state.usesRemaining - 1);
+    return true;
+  }
+
+  if (state.usesRemaining == null || state.usesRemaining <= 0) return false;
+  state.usesRemaining -= 1;
+  return true;
+};
+
 // ============================================================
 // ROLL RESOLUTION API (PHASED MODIFIER ARCHITECTURE)
 // ============================================================

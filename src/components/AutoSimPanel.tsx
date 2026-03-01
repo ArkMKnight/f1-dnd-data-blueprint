@@ -84,11 +84,11 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     setIsRunning(true);
     // Use setTimeout to allow UI update
     setTimeout(() => {
-      const res = simulateFullRace(track, drivers, cars, undefined, value);
+      const res = simulateFullRace(track, drivers, cars, undefined, value, teams);
       setResult(res);
       setIsRunning(false);
     }, 50);
-  }, [drivers, cars, lapInput, setRaceConfig, track, validateLapCount]);
+  }, [drivers, cars, teams, lapInput, setRaceConfig, track, validateLapCount]);
 
   return (
     <div className="space-y-4">
