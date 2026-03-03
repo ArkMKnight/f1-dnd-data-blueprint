@@ -29,6 +29,22 @@ export type RacePhase =
 
 export type TyreCompound = 'soft' | 'medium' | 'hard' | 'intermediate' | 'wet';
 
+export type WeatherCondition = 'dry' | 'wet' | 'heavyWet';
+
+// Tyre status bands per track/compound:
+// - fresh: full compound modifier (Soft +2, Medium +1, Hard 0)
+// - base:  no modifier (0)
+// - worn:  -1 Pace modifier and puncture risk (d6, 1 = puncture)
+// - dead:  forced pit (tyre cannot be used further)
+export type TyreStatus = 'fresh' | 'base' | 'worn' | 'dead';
+
+export interface TyreStatusBands {
+  freshUntilLap: number; // inclusive
+  baseUntilLap: number;  // inclusive
+  wornUntilLap: number;  // inclusive
+  deadFromLap: number;   // inclusive
+}
+
 export type DiceType = 'd6' | 'd20' | 'dX';
 
 export type CheckType = 
@@ -122,6 +138,9 @@ export interface Track {
   secondaryCarStat: CarStat;
   momentumLossPositions: number;   // Positions lost when Momentum Loss occurs
   // Pit Stop Parameters
+  // NOTE: `pitLoss` is the unified position loss value for manual/forced pits
+  // in the pit & tyre management layer. Legacy fields are kept for compatibility.
+  pitLoss: number;                  // Unified positions lost for a standard pit stop
   pitLossNormal: number;           // Positions lost under green flag
   pitLossSafetyCar: number;        // Reduced positions lost under SC
   pitLossFrontWing: number;        // Additional loss for front wing repair
@@ -130,6 +149,16 @@ export interface Track {
   tyreDegradation: TyreDegradationConfig;
   deterministicTraits: Trait[];
   conditionalTraits: Trait[];
+  // Optional per-race weather context; defaults to 'dry' when omitted.
+  weather?: WeatherCondition;
+  // Tyre status bands per compound (fresh/base/worn/dead) for this track.
+  tyreStatusBands: {
+    soft: TyreStatusBands;
+    medium: TyreStatusBands;
+    hard: TyreStatusBands;
+    intermediate: TyreStatusBands;
+    wet: TyreStatusBands;
+  };
 }
 
 // ============================================
@@ -537,10 +566,21 @@ export interface StartingTyreSelection {
 export interface DriverTyreState {
   driverId: string;
   compound: TyreCompound;
-  currentLap: number;              // Laps on current set
-  hasExceededHiddenLimit: boolean; // -1 Pace applied (one-time)
+  currentLap: number;              // Laps on current set (legacy hidden-limit system)
+  hasExceededHiddenLimit: boolean; // -1 Pace applied (one-time, legacy)
   isPunctured: boolean;
-  isDeadTyre: boolean;             // Reached absolute end lap
+  isDeadTyre: boolean;             // Reached absolute end lap (legacy)
+  // Extended tyre life model (pit & tyre management layer)
+  lifeRemaining: number;           // Laps remaining on current compound
+  maxLife: number;                 // Max laps for this set (after trait/track adjustments)
+  // Manual pit decision state
+  pendingPit: {
+    active: boolean;
+    compound: TyreCompound | null;
+  };
+  // Puncture / forced pit flow
+  forcedPit: boolean;              // Set when puncture forces a pit at next lap start
+  awaitingTyreSelection: boolean;  // Race progression locked until compound chosen
 }
 
 // Forced pit conditions
@@ -661,6 +701,14 @@ export const createFreshTyreState = (
   hasExceededHiddenLimit: false,
   isPunctured: false,
   isDeadTyre: false,
+  lifeRemaining: 0,
+  maxLife: 0,
+  pendingPit: {
+    active: false,
+    compound: null,
+  },
+  forcedPit: false,
+  awaitingTyreSelection: false,
 });
 
 // Utility: Check if tyre has reached hidden limit for track/compound
@@ -686,9 +734,9 @@ export const isTyreDead = (
 //    - Check forced pit conditions
 //    - DM declares voluntary pits
 //    - Resolve pit stops (atomic, no dice)
-// 2. Opportunity Selection (FIXED 2 per lap, each resolved via d(driverCount))
-//    - Roll of 1 = no valid overtake (P1 cannot overtake)
-//    - Roll of N = driver in position N receives the opportunity
+// 2. Opportunity Selection (FIXED 2 per lap, each resolved via d(driverCount - 1) + 1)
+//    - Positions 2..N are eligible (P1 is never selected)
+//    - Final selected position = base roll (1..driverCount-1) + 1
 // 3. Intent Declaration Phase (DM manual)
 // 4. Overtake/Defense rolls (d20 + modifiers)
 // 5. Awareness check (if triggered)
@@ -1115,9 +1163,9 @@ export const resolveIntentDeclaration = (
 // Fixed number of overtake opportunities per lap (may be modified by track traits later)
 export const OVERTAKE_OPPORTUNITIES_PER_LAP = 2 as const;
 
-// Opportunity selection: roll d(driverCount) for each opportunity
-// - Roll of 1: No valid overtake (P1 cannot attack forward)
-// - Roll of N: Driver in position N receives the opportunity to overtake the driver ahead
+// Opportunity selection: roll d(driverCount - 1) + 1 for each opportunity
+// - Positions 2..N are eligible; P1 is never selected as attacker
+// - Final selected position = base d(driverCount - 1) roll + 1
 
 export interface OvertakeOpportunityRoll {
   opportunityIndex: number;       // 1 or 2 (which of the two opportunities)
@@ -1135,7 +1183,7 @@ export const resolveOpportunityRoll = (
   standings: { position: number; driverId: string }[]
 ): OvertakeOpportunityRoll => {
   const rolledPosition = diceResult.roll;
-  const isValid = rolledPosition > 1; // P1 cannot overtake
+  const isValid = rolledPosition > 1; // P1 cannot overtake; callers ensure 2..N only
 
   const attacker = isValid
     ? standings.find(s => s.position === rolledPosition) ?? null

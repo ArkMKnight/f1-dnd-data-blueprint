@@ -1,4 +1,12 @@
-import type { Driver, Car, Team, Track, TyreDegradationConfig, TrackCompatibilityEntry } from '@/types/game';
+import type {
+  Driver,
+  Car,
+  Team,
+  Track,
+  TyreDegradationConfig,
+  TyreStatusBands,
+  TrackCompatibilityEntry,
+} from '@/types/game';
 
 // ============================================
 // TRACK COMPATIBILITY LOOKUP TABLE
@@ -77,6 +85,44 @@ const DEFAULT_TYRE_DEGRADATION: TyreDegradationConfig = {
   wet: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 14, hiddenMaxLimit: 18, absoluteEndLap: 24 },
 };
 
+// Default tyre status bands derived from the generic degradation model:
+// - fresh:   effective range
+// - base:    from end of effective range up to hidden limit
+// - worn:    from hidden limit+1 up to absoluteEndLap-1
+// - dead:    from absoluteEndLap onwards (forced pit)
+const DEFAULT_TYRE_STATUS_BANDS: Record<keyof TyreDegradationConfig, TyreStatusBands> = {
+  soft: {
+    freshUntilLap: DEFAULT_TYRE_DEGRADATION.soft.effectiveLapRangeEnd,
+    baseUntilLap: DEFAULT_TYRE_DEGRADATION.soft.hiddenMaxLimit,
+    wornUntilLap: DEFAULT_TYRE_DEGRADATION.soft.absoluteEndLap - 1,
+    deadFromLap: DEFAULT_TYRE_DEGRADATION.soft.absoluteEndLap,
+  },
+  medium: {
+    freshUntilLap: DEFAULT_TYRE_DEGRADATION.medium.effectiveLapRangeEnd,
+    baseUntilLap: DEFAULT_TYRE_DEGRADATION.medium.hiddenMaxLimit,
+    wornUntilLap: DEFAULT_TYRE_DEGRADATION.medium.absoluteEndLap - 1,
+    deadFromLap: DEFAULT_TYRE_DEGRADATION.medium.absoluteEndLap,
+  },
+  hard: {
+    freshUntilLap: DEFAULT_TYRE_DEGRADATION.hard.effectiveLapRangeEnd,
+    baseUntilLap: DEFAULT_TYRE_DEGRADATION.hard.hiddenMaxLimit,
+    wornUntilLap: DEFAULT_TYRE_DEGRADATION.hard.absoluteEndLap - 1,
+    deadFromLap: DEFAULT_TYRE_DEGRADATION.hard.absoluteEndLap,
+  },
+  intermediate: {
+    freshUntilLap: DEFAULT_TYRE_DEGRADATION.intermediate.effectiveLapRangeEnd,
+    baseUntilLap: DEFAULT_TYRE_DEGRADATION.intermediate.hiddenMaxLimit,
+    wornUntilLap: DEFAULT_TYRE_DEGRADATION.intermediate.absoluteEndLap - 1,
+    deadFromLap: DEFAULT_TYRE_DEGRADATION.intermediate.absoluteEndLap,
+  },
+  wet: {
+    freshUntilLap: DEFAULT_TYRE_DEGRADATION.wet.effectiveLapRangeEnd,
+    baseUntilLap: DEFAULT_TYRE_DEGRADATION.wet.hiddenMaxLimit,
+    wornUntilLap: DEFAULT_TYRE_DEGRADATION.wet.absoluteEndLap - 1,
+    deadFromLap: DEFAULT_TYRE_DEGRADATION.wet.absoluteEndLap,
+  },
+};
+
 // ============================================
 // TRACKS
 // ============================================
@@ -86,33 +132,54 @@ export const TRACKS: Track[] = [
     id: 'tr1', name: 'Monaco', lapCount: 10,
     primaryCarStat: 'lowSpeedCornering', secondaryCarStat: 'acceleration',
     momentumLossPositions: 2,
+    pitLoss: 4,
     pitLossNormal: 4, pitLossSafetyCar: 2, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
+    weather: 'dry',
+    tyreStatusBands: {
+      // Soft: Fresh 1-18, Base 19-20, Worn 21-24, Dead 25+
+      soft:  { freshUntilLap: 18, baseUntilLap: 20, wornUntilLap: 24, deadFromLap: 25 },
+      // Medium: Fresh 1-30, Base 31-37, no Worn band (goes straight to Dead at 38)
+      medium:{ freshUntilLap: 30, baseUntilLap: 37, wornUntilLap: 37, deadFromLap: 38 },
+      // Hard: Fresh 1-45, Base 46-51, Worn 52-54, Dead 55+
+      hard:  { freshUntilLap: 45, baseUntilLap: 51, wornUntilLap: 54, deadFromLap: 55 },
+      intermediate: DEFAULT_TYRE_STATUS_BANDS.intermediate,
+      wet: DEFAULT_TYRE_STATUS_BANDS.wet,
+    },
   },
   {
     id: 'tr2', name: 'Monza', lapCount: 10,
     primaryCarStat: 'topSpeed', secondaryCarStat: 'highSpeedCornering',
     momentumLossPositions: 1,
+    pitLoss: 3,
     pitLossNormal: 3, pitLossSafetyCar: 1, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
+    weather: 'dry',
+    tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
   {
     id: 'tr3', name: 'Silverstone', lapCount: 10,
     primaryCarStat: 'highSpeedCornering', secondaryCarStat: 'mediumSpeedCornering',
     momentumLossPositions: 1,
+    pitLoss: 3,
     pitLossNormal: 3, pitLossSafetyCar: 1, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
+    weather: 'dry',
+    tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
   {
     id: 'tr4', name: 'Spa-Francorchamps', lapCount: 10,
     primaryCarStat: 'highSpeedCornering', secondaryCarStat: 'topSpeed',
     momentumLossPositions: 1,
+    pitLoss: 3,
     pitLossNormal: 3, pitLossSafetyCar: 2, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
+    weather: 'dry',
+    tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
 ];
 

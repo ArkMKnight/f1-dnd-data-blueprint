@@ -28,13 +28,7 @@ import {
   escalateDamage,
   mapAwarenessOutcomeToDamageState,
   resolveIntentDeclaration,
-  createFreshTyreState,
-  hasTyreExceededHiddenLimit,
-  isTyreDead,
   checkForcedPitCondition,
-  resolvePitStop,
-  TIRE_DEGRADATION_PACE_PENALTY,
-  TIRE_PUNCTURE_ROLL,
   MINOR_DAMAGE_STAT_MODIFIER,
   MAJOR_DAMAGE_ROLL_MODIFIER,
   FRONT_WING_DAMAGE_ROLL,
@@ -48,6 +42,13 @@ import {
   applyAwarenessOutcomeTraits,
   type TraitRuntimeState,
 } from './trait-engine';
+import {
+  createInitialDriverTyreState,
+  executePitStop,
+  getTyrePhase1Modifiers,
+  getPuncturePhase3Penalty,
+  getTyreStatus,
+} from './tyre-system';
 
 // ============================================
 // RACE STATE
@@ -79,6 +80,9 @@ export interface RaceState {
   traitRuntime?: TraitRuntimeState;
   /** Experimental Parts: count of d6=1 rolls per driver (second half, every 5th lap). DNF when count >= 2. */
   experimentalPartsOnes?: Record<string, number>;
+  /** Optional pre-race configuration for starting compounds and strategy pits (used by auto sim). */
+  startingCompoundsByDriver?: Record<string, TyreCompound>;
+  plannedPits?: Record<string, { lap: number; compound: TyreCompound }[]>;
 }
 
 export interface RaceLogEvent {
@@ -111,28 +115,38 @@ export const initializeRace = (
   cars: Car[],
   startingCompound: TyreCompound = 'medium',
   totalLapsOverride?: number,
-  teams?: Team[]
+  teams?: Team[],
+  startingCompoundsByDriver?: Record<string, TyreCompound>,
+  plannedPits?: Record<string, { lap: number; compound: TyreCompound }[]>
 ): RaceState => {
   // Guard: only include drivers that have a car (avoids deleted team/driver references)
   const driversWithCars = drivers.filter(d => cars.some(c => c.teamId === d.teamId));
-  // Starting grid based on qualifying simulation (simplified: sort by qualifying modifier)
+  // Starting grid based on qualifying simulation, with Pace as tiebreaker.
   const sorted = [...driversWithCars].sort((a, b) => {
     const carA = cars.find(c => c.teamId === a.teamId);
     const carB = cars.find(c => c.teamId === b.teamId);
-    const modA = carA ? getModifiedDriverStat(a, 'qualifying', carA, track) : statToModifier(a.qualifying);
-    const modB = carB ? getModifiedDriverStat(b, 'qualifying', carB, track) : statToModifier(b.qualifying);
-    return modB - modA; // Higher is better
+    const qualA = carA ? getModifiedDriverStat(a, 'qualifying', carA, track) : statToModifier(a.qualifying);
+    const qualB = carB ? getModifiedDriverStat(b, 'qualifying', carB, track) : statToModifier(b.qualifying);
+    if (qualA !== qualB) {
+      return qualB - qualA; // Higher qualifying modifier starts ahead
+    }
+    const paceA = carA ? getModifiedDriverStat(a, 'pace', carA, track) : statToModifier(a.pace);
+    const paceB = carB ? getModifiedDriverStat(b, 'pace', carB, track) : statToModifier(b.pace);
+    return paceB - paceA; // Use Pace as deterministic tiebreaker
   });
 
-  const standings: DriverRaceState[] = sorted.map((d, i) => ({
-    driverId: d.id,
-    position: i + 1,
-    tyreState: createFreshTyreState(d.id, startingCompound),
-    damageState: { state: 'none' as const, location: null, hasFrontWingDamage: false },
-    hasPitted: false,
-    pitCount: 0,
-    isDNF: false,
-  }));
+  const standings: DriverRaceState[] = sorted.map((d, i) => {
+    const compoundForDriver = startingCompoundsByDriver?.[d.id] ?? startingCompound;
+    return {
+      driverId: d.id,
+      position: i + 1,
+      tyreState: createInitialDriverTyreState(d.id, compoundForDriver, d, track),
+      damageState: { state: 'none' as const, location: null, hasFrontWingDamage: false },
+      hasPitted: false,
+      pitCount: 0,
+      isDNF: false,
+    };
+  });
 
   const base: RaceState = {
     track,
@@ -146,6 +160,8 @@ export const initializeRace = (
     raceFlag: 'green',
     isComplete: false,
     experimentalPartsOnes: {},
+    startingCompoundsByDriver: startingCompoundsByDriver ?? undefined,
+    plannedPits: plannedPits ?? undefined,
   };
   if (teams != null) {
     base.teams = teams;
@@ -172,6 +188,68 @@ export const appendLiveRaceEvent = (
   };
   const next = [...baseEvents, nextEvent];
   state.liveEvents = next.length > MAX_LIVE_EVENTS ? next.slice(-MAX_LIVE_EVENTS) : next;
+};
+
+// ============================================
+// STANDINGS MANUAL REORDER (e.g. drag-and-drop)
+// ============================================
+
+/**
+ * Reorders the current standings based on a drag-and-drop result and logs the change.
+ *
+ * @param state Current race state
+ * @param newOrder Driver IDs in desired grid order (P1..Pn). Drivers missing from this
+ *                 list keep their relative order and are appended after the listed IDs.
+ */
+export const reorderGridWithEvent = (
+  state: RaceState,
+  newOrder: string[]
+): RaceState => {
+  const current = state.standings;
+  if (!current || current.length === 0) return state;
+
+  const byId = new Map(current.map(s => [s.driverId, s]));
+
+  const ordered: DriverRaceState[] = [];
+  const seen = new Set<string>();
+
+  // 1) Add drivers that appear in newOrder, in that order
+  newOrder.forEach((driverId, idx) => {
+    const s = byId.get(driverId);
+    if (!s) return;
+    seen.add(driverId);
+    ordered.push({ ...s, position: idx + 1 });
+  });
+
+  // 2) Append any remaining drivers, preserving their existing relative order
+  current.forEach(s => {
+    if (seen.has(s.driverId)) return;
+    ordered.push({ ...s, position: ordered.length + 1 });
+  });
+
+  // Build a concise description of the new order for the event log
+  const driverLookup = new Map(state.drivers.map(d => [d.id, d]));
+  const summary = ordered
+    .map(s => {
+      const d = driverLookup.get(s.driverId);
+      return `P${s.position} ${d?.name ?? s.driverId}`;
+    })
+    .join(', ');
+
+  const isPreRace = state.currentLap === 0;
+  const event: RaceLogEvent = {
+    lap: state.currentLap, // Pre-race edits will show as L0
+    type: isPreRace ? 'grid_edit' : 'manual_reorder',
+    description: isPreRace
+      ? `Starting grid manually reordered: ${summary}`
+      : `Standings manually reordered (Lap ${state.currentLap}): ${summary}`,
+  };
+
+  return {
+    ...state,
+    standings: ordered,
+    eventLog: [...state.eventLog, event],
+  };
 };
 
 // ============================================
@@ -230,35 +308,74 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     });
   }
 
-  // 1. Tyre increment
+  // 1. Tyre lap increment for this stint
   standings.forEach(s => {
-    if (!s.isDNF) s.tyreState = { ...s.tyreState, currentLap: s.tyreState.currentLap + 1 };
+    if (!s.isDNF) {
+      s.tyreState = { ...s.tyreState, currentLap: s.tyreState.currentLap + 1 };
+    }
   });
 
-  // 2. Forced pit checks (simplified: auto-pit on dead tyres)
+  const pittedThisLap = new Set<string>();
+
+  // 1a. Apply any pre-planned strategy pits for this lap (auto sim)
+  if (newState.plannedPits && lap < newState.totalLaps) {
+    standings.forEach(s => {
+      if (s.isDNF) return;
+      const plans = newState.plannedPits?.[s.driverId] ?? [];
+      const planForLap = plans.find(p => p.lap === lap);
+      if (!planForLap) return;
+      const driver = newState.drivers.find(d => d.id === s.driverId)!;
+      const pitRes = executePitStop(s.tyreState, driver, newState.track, 'manual', planForLap.compound);
+      s.tyreState = pitRes.updated;
+      s.pitCount++;
+      s.hasPitted = true;
+      s.position = Math.min(s.position + pitRes.positionsLost, standings.length);
+      pittedThisLap.add(s.driverId);
+      newState.eventLog.push({
+        lap,
+        type: 'pit_stop',
+        description: `${driver.name} pits (strategy: ${planForLap.compound})`,
+      });
+    });
+  }
+
+  // 1b. Forced pits at lap start (skip if already pitted for strategy this lap)
   standings.forEach(s => {
     if (s.isDNF) return;
+    if (pittedThisLap.has(s.driverId)) return;
     const forced = checkForcedPitCondition(s.tyreState);
     if (forced.isForced) {
       const driver = newState.drivers.find(d => d.id === s.driverId)!;
-      s.tyreState = createFreshTyreState(s.driverId, 'hard');
+      const pitRes = executePitStop(s.tyreState, driver, newState.track, 'forced', null);
+      s.tyreState = pitRes.updated;
       s.pitCount++;
       s.hasPitted = true;
-      s.position = Math.min(s.position + newState.track.pitLossNormal, standings.length);
-      newState.eventLog.push({ lap, type: 'pit_stop', description: `${driver.name} pits (forced: ${forced.reason})` });
+      s.position = Math.min(s.position + pitRes.positionsLost, standings.length);
+      newState.eventLog.push({
+        lap,
+        type: 'pit_stop',
+        description: `${driver.name} pits (forced: ${forced.reason})`,
+      });
     }
   });
 
   // Re-sort after pits
   standings = normalizePositions(standings);
 
-  // 3. Opportunity Selection — FIXED 2 per lap
+  // 4. Opportunity Selection — FIXED 2 per lap
   for (let oppIdx = 1; oppIdx <= OVERTAKE_OPPORTUNITIES_PER_LAP; oppIdx++) {
     const activeDrivers = standings.filter(s => !s.isDNF);
     if (activeDrivers.length < 2) break;
 
     const driverCount = activeDrivers.length;
-    const oppRoll = createDiceResult('opportunitySelection', 'dX', driverCount);
+    // Opportunity selection: d(driverCount - 1) + 1 → positions 2..N only (P1 is never selected)
+    const baseRoll = autoRoll(driverCount - 1);
+    const oppRoll: DiceResult = {
+      checkType: 'opportunitySelection',
+      diceType: 'dX',
+      diceSize: driverCount,
+      roll: baseRoll + 1,
+    };
     const standingsForRoll = activeDrivers.map(s => ({ position: s.position, driverId: s.driverId }));
     const opportunity = resolveOpportunityRoll(oppRoll, oppIdx, standingsForRoll);
 
@@ -278,18 +395,26 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     });
 
     // 4. Contested roll
+    const attackerState = standings.find(s => s.driverId === attackerId)!;
+    const defenderState = standings.find(s => s.driverId === defenderId)!;
+
     const carA = newState.cars.find(c => c.teamId === attacker.teamId)!;
     const carD = newState.cars.find(c => c.teamId === defender.teamId)!;
 
-    const attackerPaceMod = getModifiedDriverStat(attacker, 'pace', carA, newState.track);
+    const attackerBasePaceMod = getModifiedDriverStat(attacker, 'pace', carA, newState.track);
     const attackerRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, newState.track);
-    const defenderPaceMod = getModifiedDriverStat(defender, 'pace', carD, newState.track);
+    const defenderBasePaceMod = getModifiedDriverStat(defender, 'pace', carD, newState.track);
     const defenderRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, newState.track);
 
-    const attackerState = standings.find(s => s.driverId === attackerId)!;
-    const defenderState = standings.find(s => s.driverId === defenderId)!;
+    const attackerTyreMods = getTyrePhase1Modifiers(attackerState.tyreState, newState.track);
+    const defenderTyreMods = getTyrePhase1Modifiers(defenderState.tyreState, newState.track);
+
+    const attackerPaceMod = attackerBasePaceMod + attackerTyreMods.paceDelta;
+    const defenderPaceMod = defenderBasePaceMod + defenderTyreMods.paceDelta;
     const attackerDmgMod = attackerState.damageState.state === 'major' ? MAJOR_DAMAGE_ROLL_MODIFIER : 0;
     const defenderDmgMod = defenderState.damageState.state === 'major' ? MAJOR_DAMAGE_ROLL_MODIFIER : 0;
+    const attackerPunctureMod = getPuncturePhase3Penalty(attackerState.tyreState);
+    const defenderPunctureMod = getPuncturePhase3Penalty(defenderState.tyreState);
 
     const aRoll = createDiceResult('overtake', 'd20', 20);
     const dRoll = createDiceResult('defend', 'd20', 20);
@@ -317,7 +442,7 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         stat: 'pace',
         baseRoll: aRoll.roll,
         phase1Modifier: attackerPhase1,
-        externalPhase3Modifier: attackerDmgMod,
+        externalPhase3Modifier: attackerDmgMod + attackerPunctureMod,
         currentLap: lap,
         totalLaps: newState.totalLaps,
         halfIndex,
@@ -336,7 +461,7 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         stat: 'pace',
         baseRoll: dRoll.roll,
         phase1Modifier: defenderPhase1,
-        externalPhase3Modifier: defenderDmgMod,
+        externalPhase3Modifier: defenderDmgMod + defenderPunctureMod,
         currentLap: lap,
         totalLaps: newState.totalLaps,
         halfIndex,
@@ -358,16 +483,25 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
       if (aTr?.temporaryModifiers) delete aTr.temporaryModifiers['pace:nextRoll'];
       if (dTr?.temporaryModifiers) delete dTr.temporaryModifiers['pace:nextRoll'];
     } else {
-      attackerTotal = aRoll.roll + attackerPaceMod + attackerRacecraftMod + attackerDmgMod;
-      defenderTotal = dRoll.roll + defenderPaceMod + defenderRacecraftMod + defenderDmgMod;
+      attackerTotal = aRoll.roll + attackerPaceMod + attackerRacecraftMod + attackerDmgMod + attackerPunctureMod;
+      defenderTotal = dRoll.roll + defenderPaceMod + defenderRacecraftMod + defenderDmgMod + defenderPunctureMod;
     }
 
     const overtakeSuccess = attackerTotal > defenderTotal;
 
+    const aPaceLog = attackerTyreMods.paceDelta !== 0
+      ? `pace(${attackerBasePaceMod}) + tyre(${attackerTyreMods.paceDelta >= 0 ? '+' : ''}${attackerTyreMods.paceDelta})`
+      : `pace(${attackerPaceMod})`;
+    const dPaceLog = defenderTyreMods.paceDelta !== 0
+      ? `pace(${defenderBasePaceMod}) + tyre(${defenderTyreMods.paceDelta >= 0 ? '+' : ''}${defenderTyreMods.paceDelta})`
+      : `pace(${defenderPaceMod})`;
+    const aExtra = [attackerDmgMod ? `dmg(${attackerDmgMod})` : '', attackerPunctureMod ? `puncture(${attackerPunctureMod})` : ''].filter(Boolean).join(' + ');
+    const dExtra = [defenderDmgMod ? `dmg(${defenderDmgMod})` : '', defenderPunctureMod ? `puncture(${defenderPunctureMod})` : ''].filter(Boolean).join(' + ');
+
     newState.eventLog.push({
       lap,
       type: 'contested_roll',
-      description: `${attacker.name}: d20(${aRoll.roll}) + pace(${attackerPaceMod}) + racecraft(${attackerRacecraftMod})${attackerTraitsLabel}${attackerDmgMod ? ` + dmg(${attackerDmgMod})` : ''} = ${attackerTotal} vs ${defender.name}: d20(${dRoll.roll}) + pace(${defenderPaceMod}) + racecraft(${defenderRacecraftMod})${defenderTraitsLabel}${defenderDmgMod ? ` + dmg(${defenderDmgMod})` : ''} = ${defenderTotal} → ${overtakeSuccess ? 'OVERTAKE' : 'DEFENDED'}`,
+      description: `${attacker.name}: d20(${aRoll.roll}) + ${aPaceLog} + racecraft(${attackerRacecraftMod})${attackerTraitsLabel}${aExtra ? ` + ${aExtra}` : ''} = ${attackerTotal} vs ${defender.name}: d20(${dRoll.roll}) + ${dPaceLog} + racecraft(${defenderRacecraftMod})${defenderTraitsLabel}${dExtra ? ` + ${dExtra}` : ''} = ${defenderTotal} → ${overtakeSuccess ? 'OVERTAKE' : 'DEFENDED'}`,
     });
 
     if (overtakeSuccess) {
@@ -618,7 +752,7 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             stat: 'pace',
             baseRoll: retryAttackerRoll.roll,
             phase1Modifier: attackerPhase1,
-            externalPhase3Modifier: attackerDmgMod - 1, // Relentless penalty
+            externalPhase3Modifier: attackerDmgMod - 1 + attackerPunctureMod, // Relentless penalty
             currentLap: lap,
             totalLaps: newState.totalLaps,
             halfIndex,
@@ -637,7 +771,7 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             stat: 'pace',
             baseRoll: retryDefenderRoll.roll,
             phase1Modifier: defenderPhase1,
-            externalPhase3Modifier: defenderDmgMod,
+            externalPhase3Modifier: defenderDmgMod + defenderPunctureMod,
             currentLap: lap,
             totalLaps: newState.totalLaps,
             halfIndex,
@@ -662,13 +796,15 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             retryAttackerRoll.roll +
             attackerPaceMod +
             attackerRacecraftMod +
-            attackerDmgMod -
+            attackerDmgMod +
+            attackerPunctureMod -
             1;
           retryDefenderTotal =
             retryDefenderRoll.roll +
             defenderPaceMod +
             defenderRacecraftMod +
-            defenderDmgMod;
+            defenderDmgMod +
+            defenderPunctureMod;
         }
 
         const retrySuccess = retryAttackerTotal > retryDefenderTotal;
@@ -676,7 +812,7 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         newState.eventLog.push({
           lap,
           type: 'contested_roll',
-          description: `${attacker.name} (Relentless retry): d20(${retryAttackerRoll.roll}) + pace(${attackerPaceMod}) + racecraft(${attackerRacecraftMod})${retryAttackerTraitsLabel}${attackerDmgMod ? ` + dmg(${attackerDmgMod})` : ''} - 1(relentless) = ${retryAttackerTotal} vs ${defender.name}: d20(${retryDefenderRoll.roll}) + pace(${defenderPaceMod}) + racecraft(${defenderRacecraftMod})${retryDefenderTraitsLabel}${defenderDmgMod ? ` + dmg(${defenderDmgMod})` : ''} = ${retryDefenderTotal} → ${retrySuccess ? 'OVERTAKE' : 'DEFENDED'}`,
+        description: `${attacker.name} (Relentless retry): d20(${retryAttackerRoll.roll}) + pace(${attackerPaceMod}) + racecraft(${attackerRacecraftMod})${retryAttackerTraitsLabel}${attackerDmgMod ? ` + dmg(${attackerDmgMod})` : ''}${attackerPunctureMod ? ` + tyre(${attackerPunctureMod})` : ''} - 1(relentless) = ${retryAttackerTotal} vs ${defender.name}: d20(${retryDefenderRoll.roll}) + pace(${defenderPaceMod}) + racecraft(${defenderRacecraftMod})${retryDefenderTraitsLabel}${defenderDmgMod ? ` + dmg(${defenderDmgMod})` : ''}${defenderPunctureMod ? ` + tyre(${defenderPunctureMod})` : ''} = ${retryDefenderTotal} → ${retrySuccess ? 'OVERTAKE' : 'DEFENDED'}`,
         });
 
         if (retrySuccess) {
@@ -989,22 +1125,40 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     standings = normalizePositions(standings);
   }
 
-  // 8. Tyre degradation checks
+  // 8. Tyre degradation checks (legacy hidden-limit + new life system)
   standings.forEach(s => {
     if (s.isDNF) return;
-    if (isTyreDead(s.tyreState, newState.track)) {
-      s.tyreState = { ...s.tyreState, isDeadTyre: true };
-    } else if (hasTyreExceededHiddenLimit(s.tyreState, newState.track) && !s.tyreState.hasExceededHiddenLimit) {
-      s.tyreState = { ...s.tyreState, hasExceededHiddenLimit: true };
-      const driver = newState.drivers.find(d => d.id === s.driverId)!;
-      newState.eventLog.push({ lap, type: 'tyre_deg', description: `${driver.name}: tyre degradation (-1 pace)` });
-    } else if (s.tyreState.hasExceededHiddenLimit) {
-      // Puncture check
+    const driver = newState.drivers.find(d => d.id === s.driverId)!;
+
+    const status = getTyreStatus(newState.track, s.tyreState.compound, s.tyreState.currentLap);
+
+    const prevExceeded = s.tyreState.hasExceededHiddenLimit;
+    const hasExceeded = status === 'worn' || status === 'dead';
+    const isDead = status === 'dead';
+
+    s.tyreState = {
+      ...s.tyreState,
+      hasExceededHiddenLimit: hasExceeded,
+      isDeadTyre: isDead,
+    };
+
+    if (!prevExceeded && hasExceeded && status === 'worn') {
+      newState.eventLog.push({
+        lap,
+        type: 'tyre_deg',
+        description: `${driver.name}: tyre degradation (-1 pace)`,
+      });
+    }
+
+    if (status === 'worn' && !s.tyreState.isPunctured) {
       const pRoll = createDiceResult('puncture', 'd6', 6);
-      if (pRoll.roll === TIRE_PUNCTURE_ROLL) {
-        s.tyreState = { ...s.tyreState, isPunctured: true };
-        const driver = newState.drivers.find(d => d.id === s.driverId)!;
-        newState.eventLog.push({ lap, type: 'puncture', description: `${driver.name}: PUNCTURE! (d6=${pRoll.roll})` });
+      if (pRoll.roll === 1) {
+        s.tyreState = { ...s.tyreState, isPunctured: true, forcedPit: true };
+        newState.eventLog.push({
+          lap,
+          type: 'puncture',
+          description: `${driver.name}: PUNCTURE! (d6=${pRoll.roll})`,
+        });
       }
     }
   });
@@ -1027,9 +1181,20 @@ export const simulateFullRace = (
   cars: Car[],
   startingCompound: TyreCompound = 'medium',
   totalLapsOverride?: number,
-  teams?: Team[]
+  teams?: Team[],
+  startingCompoundsByDriver?: Record<string, TyreCompound>,
+  plannedPits?: Record<string, { lap: number; compound: TyreCompound }[]>
 ): RaceState => {
-  let state = initializeRace(track, drivers, cars, startingCompound, totalLapsOverride, teams);
+  let state = initializeRace(
+    track,
+    drivers,
+    cars,
+    startingCompound,
+    totalLapsOverride,
+    teams,
+    startingCompoundsByDriver,
+    plannedPits
+  );
   while (!state.isComplete) {
     state = simulateLap(state, teams);
   }

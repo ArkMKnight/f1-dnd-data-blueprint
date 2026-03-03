@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Driver, Car, Track, Team, RaceConfig } from '@/types/game';
+import type { Driver, Car, Track, Team, RaceConfig, TyreCompound } from '@/types/game';
 import { simulateFullRace, type RaceState } from '@/lib/simulation/race-engine';
 import { getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
 import { DriverNameWithTeamColors } from '@/components/DriverNameWithTeamColors';
@@ -25,6 +25,25 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
   const [result, setResult] = useState<RaceState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
+  const [startingCompounds, setStartingCompounds] = useState<Record<string, TyreCompound | null>>(
+    () => Object.fromEntries(drivers.map(d => [d.id, null as TyreCompound | null]))
+  );
+  const [strategy, setStrategy] = useState<
+    Record<string, { nextCompound: TyreCompound | null; laps: string }[]>
+  >(() =>
+    Object.fromEntries(
+      drivers.map(d => [
+        d.id,
+        [
+          { nextCompound: null as TyreCompound | null, laps: '' },
+          { nextCompound: null as TyreCompound | null, laps: '' },
+          { nextCompound: null as TyreCompound | null, laps: '' },
+        ],
+      ])
+    )
+  );
+  const [strategyError, setStrategyError] = useState<string | null>(null);
+
   const effectiveLapCount = useMemo(
     () => (raceConfig && raceConfig.trackId === track.id ? raceConfig.lapCount : track.lapCount),
     [raceConfig, track]
@@ -37,6 +56,24 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     setLapInput(String(effectiveLapCount));
     setLapError(null);
   }, [effectiveLapCount]);
+
+  useEffect(() => {
+    // Reset starting compounds & strategy when driver set changes
+    setStartingCompounds(Object.fromEntries(drivers.map(d => [d.id, null as TyreCompound | null])));
+    setStrategy(
+      Object.fromEntries(
+        drivers.map(d => [
+          d.id,
+          [
+            { nextCompound: null as TyreCompound | null, laps: '' },
+            { nextCompound: null as TyreCompound | null, laps: '' },
+            { nextCompound: null as TyreCompound | null, laps: '' },
+          ],
+        ])
+      )
+    );
+    setStrategyError(null);
+  }, [drivers]);
 
   const hasMissingTeamTrait = useMemo(
     () => teams.some(team => !(team.traitId ?? team.trait)),
@@ -68,6 +105,44 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     }
     setLapError(null);
 
+    // Require starting compound and at least one valid planned stop per driver
+    const missingStarting: string[] = [];
+    const missingStrategy: string[] = [];
+    const startingMap: Record<string, TyreCompound> = {};
+    const plannedPits: Record<string, { lap: number; compound: TyreCompound }[]> = {};
+
+    drivers.forEach(d => {
+      const sc = startingCompounds[d.id];
+      if (!sc) {
+        missingStarting.push(d.name);
+      } else {
+        startingMap[d.id] = sc;
+      }
+
+      const rows = strategy[d.id] ?? [];
+      const stops: { lap: number; compound: TyreCompound }[] = [];
+      let cumulative = 0;
+      rows.forEach(row => {
+        if (!row.nextCompound || row.laps.trim() === '') return;
+        const lapsNum = Number(row.laps);
+        if (!Number.isFinite(lapsNum) || lapsNum <= 0) return;
+        const pitLap = cumulative + lapsNum;
+        if (pitLap >= value) return;
+        stops.push({ lap: pitLap, compound: row.nextCompound });
+        cumulative = pitLap;
+      });
+      plannedPits[d.id] = stops;
+      if (stops.length === 0) {
+        missingStrategy.push(d.name);
+      }
+    });
+
+    if (missingStarting.length > 0 || missingStrategy.length > 0) {
+      setStrategyError('All drivers must have a starting compound and at least one planned stop.');
+      return;
+    }
+    setStrategyError(null);
+
     setRaceConfig(prev => {
       const base: RaceConfig = prev && prev.trackId === track.id
         ? { ...prev }
@@ -84,11 +159,20 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     setIsRunning(true);
     // Use setTimeout to allow UI update
     setTimeout(() => {
-      const res = simulateFullRace(track, drivers, cars, undefined, value, teams);
+      const res = simulateFullRace(
+        track,
+        drivers,
+        cars,
+        'medium',
+        value,
+        teams,
+        startingMap,
+        plannedPits
+      );
       setResult(res);
       setIsRunning(false);
     }, 50);
-  }, [drivers, cars, teams, lapInput, setRaceConfig, track, validateLapCount]);
+  }, [drivers, cars, teams, lapInput, setRaceConfig, startingCompounds, strategy, track, validateLapCount]);
 
   return (
     <div className="space-y-4">
@@ -139,6 +223,11 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
                   All teams must have a trait selected before starting a race.
                 </p>
               )}
+              {strategyError && !lapError && !hasMissingTeamTrait && (
+                <p className="text-xs text-destructive">
+                  {strategyError}
+                </p>
+              )}
             </div>
           </div>
           {/* Track compatibility overview */}
@@ -157,6 +246,111 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
                 </div>
               );
             })}
+          </div>
+
+          {/* Starting compounds & compulsory strategy for Auto Sim */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground">
+              Starting Tyres & Strategy (Auto Sim)
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              All drivers must have a starting compound and at least one planned stop before running the simulation.
+            </p>
+            <div className="border rounded-md p-2 max-h-64 overflow-y-auto space-y-2">
+              {drivers.map(driver => {
+                const start = startingCompounds[driver.id];
+                const rows = strategy[driver.id] ?? [];
+                return (
+                  <div key={driver.id} className="space-y-1 border-b last:border-b-0 pb-1 last:pb-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium">{driver.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground">Start:</span>
+                        <select
+                          className="border rounded px-1 py-0.5 text-[11px] bg-background"
+                          value={start ?? ''}
+                          onChange={e =>
+                            setStartingCompounds(prev => ({
+                              ...prev,
+                              [driver.id]: (e.target.value || null) as TyreCompound | null,
+                            }))
+                          }
+                        >
+                          <option value="">Select</option>
+                          <option value="soft">Soft</option>
+                          <option value="medium">Medium</option>
+                          <option value="hard">Hard</option>
+                          <option value="intermediate">Inter</option>
+                          <option value="wet">Wet</option>
+                        </select>
+                      </div>
+                    </div>
+                    {[0, 1, 2].map(idx => {
+                      const row = rows[idx] ?? { nextCompound: null as TyreCompound | null, laps: '' };
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between gap-2 pl-4"
+                        >
+                          <span className="text-[11px] text-muted-foreground">
+                            Planned stint {idx + 1}:
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <select
+                              className="border rounded px-1 py-0.5 text-[11px] bg-background"
+                              value={row.nextCompound ?? ''}
+                              onChange={e =>
+                                setStrategy(prev => {
+                                  const current = prev[driver.id] ?? [
+                                    { nextCompound: null as TyreCompound | null, laps: '' },
+                                    { nextCompound: null as TyreCompound | null, laps: '' },
+                                    { nextCompound: null as TyreCompound | null, laps: '' },
+                                  ];
+                                  const updated = [...current];
+                                  updated[idx] = {
+                                    nextCompound: (e.target.value || null) as TyreCompound | null,
+                                    laps: row.laps,
+                                  };
+                                  return { ...prev, [driver.id]: updated };
+                                })
+                              }
+                            >
+                              <option value="">Next tyre</option>
+                              <option value="soft">Soft</option>
+                              <option value="medium">Medium</option>
+                              <option value="hard">Hard</option>
+                              <option value="intermediate">Inters</option>
+                              <option value="wet">Wets</option>
+                            </select>
+                            <input
+                              type="number"
+                              className="border rounded px-1 py-0.5 text-[11px] bg-background w-20 h-7 text-[11px]"
+                              placeholder="Laps"
+                              value={row.laps}
+                              onChange={e =>
+                                setStrategy(prev => {
+                                  const current = prev[driver.id] ?? [
+                                    { nextCompound: null as TyreCompound | null, laps: '' },
+                                    { nextCompound: null as TyreCompound | null, laps: '' },
+                                    { nextCompound: null as TyreCompound | null, laps: '' },
+                                  ];
+                                  const updated = [...current];
+                                  updated[idx] = {
+                                    nextCompound: row.nextCompound,
+                                    laps: e.target.value,
+                                  };
+                                  return { ...prev, [driver.id]: updated };
+                                })
+                              }
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </CardContent>
       </Card>
