@@ -16,6 +16,7 @@ import type {
 } from '@/types/game';
 import {
   OVERTAKE_OPPORTUNITIES_PER_LAP,
+  getOvertakeOpportunitiesPerLapForTrack,
   resolveOpportunityRoll,
   shouldTriggerAwarenessCheck,
   calculateEffectiveAwarenessDifference,
@@ -34,7 +35,13 @@ import {
   FRONT_WING_DAMAGE_ROLL,
   determineRaceFlag,
 } from '@/types/game';
-import { statToModifier, getModifiedDriverStat } from './track-compatibility';
+import {
+  statToModifier,
+  getModifiedDriverStat,
+  getMonacoRacecraftBonus,
+  getTrackMatchScore,
+  getTrackBonusTiers,
+} from './track-compatibility';
 import { TRAITS_BY_ID } from '@/lib/trait-definitions';
 import {
   initTraitRuntimeState,
@@ -83,6 +90,8 @@ export interface RaceState {
   /** Optional pre-race configuration for starting compounds and strategy pits (used by auto sim). */
   startingCompoundsByDriver?: Record<string, TyreCompound>;
   plannedPits?: Record<string, { lap: number; compound: TyreCompound }[]>;
+  /** Monaco Track Bonus — Quali Lock: driver starting P1 with 200+ Match Score cannot be overtaken while in P1. */
+  monacoQualiLockDriverId?: string;
 }
 
 export interface RaceLogEvent {
@@ -148,6 +157,28 @@ export const initializeRace = (
     };
   });
 
+  // Monaco Track Bonus — Quali Lock:
+  // If starting on P1 at Monaco and the P1 car has a Match Score >= 200,
+  // that driver cannot be overtaken on track while holding P1. This will
+  // also re-apply whenever they regain P1 later in the race.
+  let monacoQualiLockDriverId: string | undefined;
+  if (track.name === 'Monaco' && cars.length > 0) {
+    const p1 = standings.find(s => s.position === 1);
+    if (p1) {
+      const p1Driver = driversWithCars.find(d => d.id === p1.driverId);
+      if (p1Driver) {
+        const p1Car = cars.find(c => c.teamId === p1Driver.teamId);
+        if (p1Car) {
+          const matchScore = getTrackMatchScore(p1Car, track);
+          const tiers = getTrackBonusTiers(matchScore);
+          if (tiers.trackSpecificBonusEligible) {
+            monacoQualiLockDriverId = p1.driverId;
+          }
+        }
+      }
+    }
+  }
+
   const base: RaceState = {
     track,
     drivers: driversWithCars,
@@ -162,6 +193,7 @@ export const initializeRace = (
     experimentalPartsOnes: {},
     startingCompoundsByDriver: startingCompoundsByDriver ?? undefined,
     plannedPits: plannedPits ?? undefined,
+    monacoQualiLockDriverId,
   };
   if (teams != null) {
     base.teams = teams;
@@ -363,7 +395,8 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
   standings = normalizePositions(standings);
 
   // 4. Opportunity Selection — FIXED 2 per lap
-  for (let oppIdx = 1; oppIdx <= OVERTAKE_OPPORTUNITIES_PER_LAP; oppIdx++) {
+  const opportunitiesThisLap = getOvertakeOpportunitiesPerLapForTrack(newState.track);
+  for (let oppIdx = 1; oppIdx <= opportunitiesThisLap; oppIdx++) {
     const activeDrivers = standings.filter(s => !s.isDNF);
     if (activeDrivers.length < 2) break;
 
@@ -398,13 +431,44 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     const attackerState = standings.find(s => s.driverId === attackerId)!;
     const defenderState = standings.find(s => s.driverId === defenderId)!;
 
+    // Monaco Track Bonus — Quali Lock:
+    // Protected driver in P1 cannot be overtaken on track. If they are the
+    // defender and currently P1, treat the attempt as automatically defended.
+    if (
+      newState.track.name === 'Monaco' &&
+      newState.monacoQualiLockDriverId &&
+      defenderId === newState.monacoQualiLockDriverId &&
+      defenderState.position === 1 &&
+      !defenderState.isDNF
+    ) {
+      appendLiveRaceEvent(newState, {
+        lapNumber: lap,
+        type: 'defense',
+        description: `${defender.name} defends from ${attacker.name} (Monaco Quali Lock)`,
+        primaryDriverId: defender.id,
+        secondaryDriverId: attacker.id,
+      });
+      newState.eventLog.push({
+        lap,
+        type: 'opportunity',
+        description: `Opportunity ${oppIdx}: ${attacker.name} cannot overtake ${defender.name} (Monaco Quali Lock P1)`,
+      });
+      continue;
+    }
+
     const carA = newState.cars.find(c => c.teamId === attacker.teamId)!;
     const carD = newState.cars.find(c => c.teamId === defender.teamId)!;
 
     const attackerBasePaceMod = getModifiedDriverStat(attacker, 'pace', carA, newState.track);
-    const attackerRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, newState.track);
+    let attackerRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, newState.track);
     const defenderBasePaceMod = getModifiedDriverStat(defender, 'pace', carD, newState.track);
-    const defenderRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, newState.track);
+    let defenderRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, newState.track);
+
+    // Monaco Track Trait — "Watch your Step":
+    // When fighting a driver with a lower (Racecraft - Pace) difference,
+    // gain +1 Racecraft for this contested check.
+    attackerRacecraftMod += getMonacoRacecraftBonus(newState.track, attacker, defender);
+    defenderRacecraftMod += getMonacoRacecraftBonus(newState.track, defender, attacker);
 
     const attackerTyreMods = getTyrePhase1Modifiers(attackerState.tyreState, newState.track);
     const defenderTyreMods = getTyrePhase1Modifiers(defenderState.tyreState, newState.track);

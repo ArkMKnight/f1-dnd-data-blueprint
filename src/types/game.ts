@@ -1163,6 +1163,13 @@ export const resolveIntentDeclaration = (
 // Fixed number of overtake opportunities per lap (may be modified by track traits later)
 export const OVERTAKE_OPPORTUNITIES_PER_LAP = 2 as const;
 
+// Track-specific hook for overtake opportunities per lap.
+// Monaco Track Trait — "No Elbow Room": only 1 opportunity per lap.
+export const getOvertakeOpportunitiesPerLapForTrack = (track: Track): number => {
+  if (track.name === 'Monaco') return 1;
+  return OVERTAKE_OPPORTUNITIES_PER_LAP;
+};
+
 // Opportunity selection: roll d(driverCount - 1) + 1 for each opportunity
 // - Positions 2..N are eligible; P1 is never selected as attacker
 // - Final selected position = base d(driverCount - 1) roll + 1

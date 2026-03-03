@@ -67,11 +67,12 @@ export const getModifiedDriverStat = (
   lookupTable: TrackCompatibilityEntry[] = TRACK_COMPATIBILITY_TABLE
 ): number => {
   const rawStat = driver[statName];
+  const isMonaco = track.name === 'Monaco';
   const baseMod =
     statName === 'pace'
-      ? paceModifierFromStat(rawStat)
+      ? (isMonaco ? racecraftModifierFromStat(rawStat) : paceModifierFromStat(rawStat))
       : statName === 'racecraft'
-        ? racecraftModifierFromStat(rawStat)
+        ? (isMonaco ? paceModifierFromStat(rawStat) : racecraftModifierFromStat(rawStat))
         : statToModifier(rawStat);
 
   if (!isStatAffectedByTrackCompatibility(statName)) {
@@ -95,4 +96,24 @@ export const getTrackCompatibilityModifier = (
 ): number => {
   const compat = calculateTrackCompatibility(car, track, lookupTable);
   return compat.modifier;
+};
+
+/**
+ * Monaco Track Trait — "Watch your Step"
+ *
+ * When fighting a driver with a lower (Racecraft - Pace) difference than your own,
+ * gain +1 Racecraft modifier for that contested check.
+ *
+ * This helper returns the per-check racecraft bonus for `driver` against `opponent`
+ * and is only active on Monaco.
+ */
+export const getMonacoRacecraftBonus = (
+  track: Track,
+  driver: Driver,
+  opponent: Driver
+): number => {
+  if (track.name !== 'Monaco') return 0;
+  const selfDiff = (driver.racecraft ?? 0) - (driver.pace ?? 0);
+  const oppDiff = (opponent.racecraft ?? 0) - (opponent.pace ?? 0);
+  return selfDiff > oppDiff ? 1 : 0;
 };

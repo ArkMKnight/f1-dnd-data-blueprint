@@ -13,15 +13,23 @@ import type {
   RaceEvent,
 } from '@/types/game';
 import {
-  OVERTAKE_OPPORTUNITIES_PER_LAP, resolveOpportunityRoll,
-  shouldTriggerAwarenessCheck, calculateEffectiveAwarenessDifference,
-  checkEvasionPriority, determineAwarenessOutcomeCategory, resolveAwarenessD6Outcome,
-  applyEvasionDowngrade, requiresDamageHandoff, mapAwarenessOutcomeToDamageState,
+  OVERTAKE_OPPORTUNITIES_PER_LAP,
+  getOvertakeOpportunitiesPerLapForTrack,
+  resolveOpportunityRoll,
+  shouldTriggerAwarenessCheck,
+  calculateEffectiveAwarenessDifference,
+  checkEvasionPriority,
+  determineAwarenessOutcomeCategory,
+  resolveAwarenessD6Outcome,
+  applyEvasionDowngrade,
+  requiresDamageHandoff,
+  mapAwarenessOutcomeToDamageState,
   escalateDamage,
-  checkForcedPitCondition, MAJOR_DAMAGE_ROLL_MODIFIER,
+  checkForcedPitCondition,
+  MAJOR_DAMAGE_ROLL_MODIFIER,
   resolveIntentDeclaration,
 } from '@/types/game';
-import { statToModifier, getModifiedDriverStat } from './track-compatibility';
+import { statToModifier, getModifiedDriverStat, getMonacoRacecraftBonus } from './track-compatibility';
 import type { DriverRaceState, RaceState } from './race-engine';
 import { initializeRace, appendLiveRaceEvent } from './race-engine';
 import { executePitStop, getTyreStatus, getTyrePhase1Modifiers, getPuncturePhase3Penalty } from './tyre-system';
@@ -336,6 +344,32 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
 
       const attacker = race.drivers.find(d => d.id === opp.attackerDriverId)!;
       const defender = race.drivers.find(d => d.id === opp.defenderDriverId)!;
+
+      // Monaco Track Bonus — Quali Lock (GM mode):
+      // If the defender is the protected P1 driver, automatically deny on-track overtakes.
+      const defenderState = race.standings.find(s => s.driverId === defender.id)!;
+      if (
+        race.track.name === 'Monaco' &&
+        race.monacoQualiLockDriverId &&
+        defender.id === race.monacoQualiLockDriverId &&
+        defenderState.position === 1 &&
+        !defenderState.isDNF
+      ) {
+        race.eventLog.push({
+          lap: race.currentLap,
+          type: 'opportunity',
+          description: `Opportunity ${state.currentOpportunityIndex}: ${attacker.name} cannot overtake ${defender.name} (Monaco Quali Lock P1)`,
+        });
+        appendLiveRaceEvent(race, {
+          lapNumber: race.currentLap,
+          type: 'defense',
+          description: `${defender.name} defends from ${attacker.name} (Monaco Quali Lock)`,
+          primaryDriverId: defender.id,
+          secondaryDriverId: attacker.id,
+        });
+        return moveToNextOpportunityOrEnd(state);
+      }
+
       race.eventLog.push({
         lap: race.currentLap, type: 'opportunity',
         description: `Opportunity ${state.currentOpportunityIndex}: ${attacker.name} (P${opp.selectedPosition}) attacks ${defender.name}`,
@@ -702,9 +736,10 @@ const generateOpportunityPrompt = (state: GMState): GMState => {
     return advanceGMState(state);
   }
   const diceSpan = Math.max(1, activeDrivers.length - 1);
+  const opportunitiesThisLap = getOvertakeOpportunitiesPerLapForTrack(state.raceState.track);
   state.pendingPrompt = {
     phase: 'opportunity_roll',
-    description: `Opportunity ${state.currentOpportunityIndex} of ${OVERTAKE_OPPORTUNITIES_PER_LAP}: Roll d${diceSpan} + 1 for position selection (2..${activeDrivers.length})`,
+    description: `Opportunity ${state.currentOpportunityIndex} of ${opportunitiesThisLap}: Roll d${diceSpan} + 1 for position selection (2..${activeDrivers.length})`,
     needsInput: true,
     inputType: 'roll',
     diceSize: diceSpan,
@@ -713,7 +748,8 @@ const generateOpportunityPrompt = (state: GMState): GMState => {
 };
 
 const moveToNextOpportunityOrEnd = (state: GMState): GMState => {
-  if (state.currentOpportunityIndex < OVERTAKE_OPPORTUNITIES_PER_LAP) {
+  const opportunitiesThisLap = getOvertakeOpportunitiesPerLapForTrack(state.raceState.track);
+  if (state.currentOpportunityIndex < opportunitiesThisLap) {
     state.currentOpportunityIndex++;
     state.currentOpportunity = null;
     state.currentPhase = 'opportunity_roll';
@@ -795,9 +831,13 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
   const dState = race.standings.find(s => s.driverId === defender.id)!;
 
   const aPaceMod = getModifiedDriverStat(attacker, 'pace', carA, race.track);
-  const aRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, race.track);
+  let aRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, race.track);
   const dPaceMod = getModifiedDriverStat(defender, 'pace', carD, race.track);
-  const dRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, race.track);
+  let dRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, race.track);
+
+  // Monaco Track Trait — "Watch your Step"
+  aRacecraftMod += getMonacoRacecraftBonus(race.track, attacker, defender);
+  dRacecraftMod += getMonacoRacecraftBonus(race.track, defender, attacker);
   const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track);
   const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track);
   const aPaceWithTyre = aPaceMod + aTyreMods.paceDelta;
@@ -1085,9 +1125,13 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
   const dState = race.standings.find(s => s.driverId === defender.id)!;
 
   const aPaceMod = getModifiedDriverStat(attacker, 'pace', carA, race.track);
-  const aRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, race.track);
+  let aRacecraftMod = getModifiedDriverStat(attacker, 'racecraft', carA, race.track);
   const dPaceMod = getModifiedDriverStat(defender, 'pace', carD, race.track);
-  const dRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, race.track);
+  let dRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, race.track);
+
+  // Monaco Track Trait — "Watch your Step"
+  aRacecraftMod += getMonacoRacecraftBonus(race.track, attacker, defender);
+  dRacecraftMod += getMonacoRacecraftBonus(race.track, defender, attacker);
   const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track);
   const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track);
   const aPaceWithTyre = aPaceMod + aTyreMods.paceDelta;
