@@ -75,6 +75,10 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [hasSavedCurrentRace, setHasSavedCurrentRace] = useState(false);
   const { addRaceToHistory } = useData();
+  const [prevPositions, setPrevPositions] = useState<Record<string, number>>({});
+  const [positionDeltas, setPositionDeltas] = useState<Record<string, number>>({});
+  const [commentary, setCommentary] = useState<string | null>(null);
+  const [lastContestIndex, setLastContestIndex] = useState<number | null>(null);
 
   const effectiveLapCount = useMemo(
     () => (raceConfig && raceConfig.trackId === track.id ? raceConfig.lapCount : track.lapCount),
@@ -95,6 +99,8 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
   useEffect(() => {
     setLapInput(String(effectiveLapCount));
     setLapError(null);
+    setPrevPositions({});
+    setPositionDeltas({});
   }, [effectiveLapCount]);
 
   useEffect(() => {
@@ -114,6 +120,42 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     );
     setStrategyError(null);
   }, [participatingDriverIdsKey]);
+
+  // Track which drivers changed position between ticks for lightweight animation.
+  useEffect(() => {
+    if (!gmState) return;
+    const current = gmState.raceState.standings;
+    if (!current || current.length === 0) return;
+
+    setPositionDeltas(() => {
+      const deltas: Record<string, number> = {};
+      current.forEach(s => {
+        const prevPos = prevPositions[s.driverId];
+        if (prevPos !== undefined && prevPos !== s.position) {
+          // Negative delta = moved up (better position), positive = moved down.
+          deltas[s.driverId] = s.position - prevPos;
+        }
+      });
+      return deltas;
+    });
+
+    setPrevPositions(() => {
+      const map: Record<string, number> = {};
+      current.forEach(s => {
+        map[s.driverId] = s.position;
+      });
+      return map;
+    });
+  }, [gmState, prevPositions]);
+
+  // Clear the highlight after a delay so rows "pop" then settle.
+  useEffect(() => {
+    if (!Object.keys(positionDeltas).length) return;
+    const timer = setTimeout(() => {
+      setPositionDeltas({});
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [positionDeltas]);
 
   const validateLapCount = useCallback((raw: string): { valid: boolean; value?: number; error?: string } => {
     if (raw.trim() === '') {
@@ -199,6 +241,13 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       plannedPits
     );
     const advanced = advanceGMState(session);
+    // Initialize previous positions from the first race state so we only show arrows on actual changes.
+    const initialPrev: Record<string, number> = {};
+    advanced.raceState.standings.forEach(s => {
+      initialPrev[s.driverId] = s.position;
+    });
+    setPrevPositions(initialPrev);
+    setPositionDeltas({});
     setGmState(advanced);
     setIsStarted(true);
     setHasSavedCurrentRace(false);
@@ -326,6 +375,169 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     const newRaceState = { ...race, standings: newStandings };
     setGmState({ ...gmState, raceState: newRaceState });
   }, [gmState]);
+
+  // Commentary: derive a single line for the last resolved contest.
+  useEffect(() => {
+    if (!gmState) return;
+    const log = gmState.raceState.eventLog;
+    if (!log || log.length === 0) return;
+
+    let lastIdx = -1;
+    for (let i = log.length - 1; i >= 0; i--) {
+      if (log[i].type === 'contested_roll') {
+        lastIdx = i;
+        break;
+      }
+    }
+    if (lastIdx === -1 || lastIdx === lastContestIndex) return;
+
+    const contested = log[lastIdx];
+    const desc: string = contested.description;
+    const match = desc.match(/^(.+?): d20.* vs (.+?): d20.* → (OVERTAKE|DEFENDED)$/);
+    if (!match) {
+      setLastContestIndex(lastIdx);
+      return;
+    }
+    const attackerName = match[1];
+    const defenderName = match[2];
+    const resultWord = match[3]; // 'OVERTAKE' | 'DEFENDED'
+
+    // Scan events after this contested roll to refine outcome.
+    const after = log.slice(lastIdx + 1);
+    let category: 'overtake' | 'defense' | 'majorDamage' | 'minorDamage' | 'clean' | 'mechanical' =
+      resultWord === 'OVERTAKE' ? 'overtake' : 'defense';
+
+    for (const e of after) {
+      if (e.type === 'damage') {
+        const d = String(e.description).toLowerCase();
+        if (d.includes('mechanical dnf') || d.includes('engine failure') || d.includes('mechanical failure')) {
+          category = 'mechanical';
+          break;
+        }
+        if (d.includes('major') || d.includes('dnf')) {
+          category = 'majorDamage';
+          break;
+        }
+        category = 'minorDamage';
+        break;
+      }
+      if (e.type === 'awareness') {
+        const d = String(e.description).toLowerCase();
+        if (d.includes('clean racing')) {
+          category = 'clean';
+          // keep scanning for possible subsequent damage; only break if we never see damage.
+        }
+      }
+    }
+
+    const pickRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+
+    const overtakeLines: string[] = [
+      'The overtaking driver dives to the inside at Sainte Devote—and this time it sticks! The defending driver has to yield!',
+      'Out of Portier, the overtaking driver gets the perfect exit and blasts through the Tunnel to complete the move before the Nouvelle Chicane!',
+      'Late on the brakes into the Nouvelle Chicane—the overtaking driver commits fully and makes it work!',
+      'Around the outside at Casino Square! The overtaking driver pulls off something truly special at Monaco!',
+      'The overtaking driver forces the defending driver narrow at Mirabeau and slips through on the exit!',
+      'A brilliant switchback at the Loews Hairpin—the overtaking driver gets superior traction and completes the pass!',
+      'Through the Tunnel in the slipstream, the overtaking driver draws alongside and seals it into the chicane!',
+      'A bold lunge into Rascasse—the overtaking driver muscles past and claims the position!',
+      'The overtaking driver keeps the pressure on through the Swimming Pool and capitalizes on a tiny mistake from the defending driver!',
+      'Side by side into Sainte Devote, but the overtaking driver holds the inside line and emerges ahead!',
+      'The overtaking driver sells the dummy at Mirabeau, cuts back underneath, and takes the place cleanly!',
+      'A stunning move at Tabac! The overtaking driver commits to the outside and makes it stick!',
+      'The overtaking driver positions perfectly through Casino and powers past before the braking zone!',
+      'Into the final corner, the overtaking driver gets the traction and drags past the defending driver across the line!',
+      'The overtaking driver stays patient all lap long, then strikes decisively at the Nouvelle Chicane to secure the overtake!',
+    ];
+
+    const defenseLines: string[] = [
+      'The overtaking driver dives to the inside at Sainte Devote, but the defending driver shuts the door just in time!',
+      'The overtaking driver gets a better launch out of Portier and pulls alongside into the Tunnel—can he make it stick? No! The defending driver holds firm.',
+      'Late on the brakes into the Nouvelle Chicane! The overtaking driver throws it in, but the defending driver keeps the apex.',
+      'The overtaking driver pressures through Casino Square, but the defending driver places the car perfectly on exit.',
+      'Wheel-to-wheel into Mirabeau—yet the defending driver calmly squeezes the overtaking driver out.',
+      'The overtaking driver shows the nose at the Loews Hairpin, but there’s simply no room at Monaco!',
+      'Through the Tunnel they go, the overtaking driver tucked right under the rear wing of the defending driver.',
+      'The overtaking driver lunges into Rascasse! That’s brave—but the defending driver cuts back on exit!',
+      'Brilliant defense from the defending driver at the Swimming Pool, denying the overtaking driver any overlap.',
+      'The overtaking driver tries the outside line at Casino—ambitious stuff—but the defending driver forces him wide.',
+      'The defending driver parks it on the apex at Sainte Devote, frustrating the overtaking driver yet again.',
+      'The overtaking driver gets a run down to the Nouvelle Chicane—this could be the move! Not quite, the defending driver brakes impossibly late.',
+      'Side by side into Mirabeau Haute, but the defending driver keeps the inside covered.',
+      'The overtaking driver switches back at Portier, looking for traction into the Tunnel!',
+      'Through Tabac, the overtaking driver edges closer, but the defending driver refuses to blink.',
+      'The overtaking driver shapes up for a dive at Rascasse—no, he thinks better of it as the defending driver guards the line.',
+      'The defending driver exits the Swimming Pool flawlessly, denying the overtaking driver momentum.',
+      'Into the Tunnel, the overtaking driver is in the slipstream, but the defending driver positions the car perfectly for the chicane.',
+      'The overtaking driver commits around the outside at the Nouvelle Chicane! That’s sensational—but the defending driver hangs on!',
+      'The defending driver covers the inside at Mirabeau, forcing the overtaking driver to back out.',
+      'The overtaking driver nearly draws alongside at the Loews Hairpin, but there’s just not enough road.',
+      'The defending driver brushes the barrier at Tabac but still keeps the overtaking driver behind!',
+      'Into Rascasse they go—the overtaking driver tries the switchback, but the defending driver powers out cleanly.',
+      'The overtaking driver shows incredible patience behind the defending driver through the tight final sector.',
+      'The defending driver makes the car as wide as possible through Sainte Devote, denying the overtaking driver any gap.',
+      'Through the final corner, the overtaking driver gets the better traction, but the defending driver edges ahead across the line!',
+    ];
+
+    const majorDamageLines: string[] = [
+      'The overtaking driver dives into Sainte Devote but clips the rear of the defending driver—huge impact and both cars slam into the barriers!',
+      'Into the Nouvelle Chicane, the overtaking driver locks up and makes heavy contact with the defending driver—front wing destroyed and debris everywhere!',
+      'Side by side through the Swimming Pool—there’s no space! The overtaking driver touches the barrier and collects the defending driver in a massive crash!',
+      'The overtaking driver attempts a bold move at Rascasse, but the defending driver turns in—major collision and both cars are out on the spot!',
+      'Through Casino Square, the overtaking driver loses the rear under pressure and smashes into the defending driver—serious suspension damage for both!',
+    ];
+
+    const minorDamageLines: string[] = [
+      'The overtaking driver taps the rear of the defending driver at Mirabeau—small front wing damage but the fight continues.',
+      'Light contact at the Loews Hairpin as the overtaking driver nudges the defending driver—endplate missing but both continue.',
+      'The defending driver squeezes the overtaking driver at Tabac—there’s a brush with the wall and slight rear damage.',
+      'Into Sainte Devote, the overtaking driver locks up and clips the defending driver—minor floor damage reported.',
+      'The overtaking driver makes slight wheel-to-wheel contact at the Nouvelle Chicane—both pick up cosmetic damage but stay racing.',
+    ];
+
+    const cleanLines: string[] = [
+      'The overtaking driver lunges far too late into Rascasse and nearly spears into the defending driver—stewards will look at that one.',
+      'The defending driver moves under braking into the Nouvelle Chicane, forcing the overtaking driver to take evasive action!',
+      'The overtaking driver attempts a move at Casino from too far back—almost launching over the defending driver’s rear wheel!',
+      'Through the Tunnel, the defending driver weaves aggressively, breaking the overtaking driver’s momentum.',
+      'The overtaking driver pushes the defending driver toward the barrier at the Swimming Pool—very dangerous positioning there.',
+    ];
+
+    const mechanicalLines: string[] = [
+      'The overtaking driver was lining up a move into Sainte Devote, but suddenly slows—engine failure! That’s race over in heartbreaking fashion.',
+      'The defending driver exits the Tunnel ahead, but smoke pours from the rear—mechanical failure ends the battle instantly!',
+    ];
+
+    let template: string;
+    switch (category) {
+      case 'majorDamage':
+        template = pickRandom(majorDamageLines);
+        break;
+      case 'minorDamage':
+        template = pickRandom(minorDamageLines);
+        break;
+      case 'clean':
+        template = pickRandom(cleanLines);
+        break;
+      case 'mechanical':
+        template = pickRandom(mechanicalLines);
+        break;
+      case 'defense':
+        template = pickRandom(defenseLines);
+        break;
+      case 'overtake':
+      default:
+        template = pickRandom(overtakeLines);
+        break;
+    }
+
+    const withNames = template
+      .replace(/the overtaking driver/gi, attackerName)
+      .replace(/the defending driver/gi, defenderName);
+
+    setCommentary(withNames);
+    setLastContestIndex(lastIdx);
+  }, [gmState, lastContestIndex]);
 
   const handleSaveRace = useCallback(() => {
     if (!gmState) return;
@@ -577,7 +789,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
         {race.isComplete && <Badge className="bg-green-600 text-white">RACE COMPLETE</Badge>}
       </div>
 
-      {/* Standings (drag driver name to reorder) */}
+      {/* Current Standings (drag driver name to reorder) */}
       <Card>
         <CardHeader className="py-3">
           <CardTitle className="text-sm">Current Standings</CardTitle>
@@ -589,11 +801,20 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
               .map(s => {
                 const driver = drivers.find(d => d.id === s.driverId);
                 const team = driver ? teams.find(t => t.id === driver.teamId) : null;
+                const delta = positionDeltas[s.driverId] ?? 0;
+                const movedUp = delta < 0;
+                const movedDown = delta > 0;
+                const hasDelta = movedUp || movedDown;
                 return (
                   <ContextMenu key={s.driverId}>
                     <ContextMenuTrigger asChild>
                       <div
-                        className="flex items-center justify-between px-4 py-2 text-sm cursor-default"
+                        className={[
+                          'flex items-center justify-between px-4 py-2 text-sm cursor-default transition-all duration-500 ease-out',
+                          hasDelta ? 'scale-[1.04] bg-primary/10 ring-2 ring-primary/50 shadow-md' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                         onDragOver={event => {
                           event.preventDefault();
                           event.dataTransfer.dropEffect = 'move';
@@ -601,7 +822,21 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
                         onDrop={handleStandingsDrop(s.driverId)}
                       >
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold w-6 text-center">P{s.position}</span>
+                          <span className="font-mono font-bold w-10 text-left flex items-center gap-1">
+                            <span>
+                              P{s.position}
+                            </span>
+                            {movedUp && (
+                              <span className="text-emerald-500 font-semibold text-sm translate-y-[-1px]">
+                                ↑
+                              </span>
+                            )}
+                            {movedDown && (
+                              <span className="text-red-500 font-semibold text-sm translate-y-[-1px]">
+                                ↓
+                              </span>
+                            )}
+                          </span>
                           <div
                             draggable
                             onDragStart={handleStandingsDragStart(s.driverId)}
@@ -694,7 +929,23 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
         </CardContent>
       </Card>
 
-      {/* Live race event feed (above dice rolling section) */}
+      {/* Commentary card */}
+      <Card>
+        <CardHeader className="py-3">
+          <CardTitle className="text-sm">Commentary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {commentary ? (
+            <p className="text-sm leading-relaxed">{commentary}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No contest has been resolved yet. Commentary will appear here after the next overtake attempt.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Live race event feed */}
       <LiveRaceEventFeed
         events={race.liveEvents ?? []}
         drivers={drivers}
