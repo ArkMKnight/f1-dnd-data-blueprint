@@ -183,13 +183,21 @@ export const getTyrePhase1Modifiers = (
 
   // Override based on status bands:
   // - fresh: full compound modifier (unchanged)
-  // - base:  no modifier (0)
-  // - worn:  -1 (universal penalty)
+  // - base:  no modifier (0), except Hard which is -1
+  // - worn:  -1 (universal penalty), except Hard which is -2
   // - dead:  handled by forced pit; no additional Pace modifier needed
   if (status === 'base') {
-    paceDelta = 0;
+    if (tyre.compound === 'hard') {
+      paceDelta = -1;
+    } else {
+      paceDelta = 0;
+    }
   } else if (status === 'worn') {
-    paceDelta = -1;
+    if (tyre.compound === 'hard') {
+      paceDelta = -2;
+    } else {
+      paceDelta = -1;
+    }
   }
 
   return { paceDelta, adaptabilityDelta };
