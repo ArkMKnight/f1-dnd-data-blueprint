@@ -14,6 +14,7 @@ import { GMModePanel } from '@/components/GMModePanel';
 import { AutoSimPanel } from '@/components/AutoSimPanel';
 import { RaceHistoryPanel } from '@/components/RaceHistoryPanel';
 import { DriverSelectionPanel } from '@/components/DriverSelectionPanel';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 const Index = () => {
   const [selectedTrackId, setSelectedTrackId] = useState(TRACKS[0].id);
@@ -75,23 +76,26 @@ const Index = () => {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold tracking-tight">F1 × DnD Race Simulator</h1>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/teams">Teams</Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/drivers">Drivers</Link>
-            </Button>
-            <Select value={selectedTrackId} onValueChange={setSelectedTrackId}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TRACKS.map(t => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex items-center gap-4">
+            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/teams">Teams</Link>
+              </Button>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/drivers">Drivers</Link>
+              </Button>
+              <Select value={selectedTrackId} onValueChange={setSelectedTrackId}>
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TRACKS.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 

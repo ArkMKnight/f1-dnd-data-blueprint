@@ -36,6 +36,9 @@ export const LiveRaceEventFeed = ({ events, drivers, teams }: LiveRaceEventFeedP
                 const primaryTeam = primaryDriver
                   ? teams.find(t => t.id === primaryDriver.teamId)
                   : null;
+                const secondaryTeam = secondaryDriver
+                  ? teams.find(t => t.id === secondaryDriver.teamId)
+                  : null;
 
                 return (
                   <div
@@ -53,12 +56,15 @@ export const LiveRaceEventFeed = ({ events, drivers, teams }: LiveRaceEventFeedP
                         nameClassName="truncate"
                       />
                       {secondaryDriver && (
-                        <span className="text-muted-foreground">vs</span>
-                      )}
-                      {secondaryDriver && (
-                        <span className="truncate">
-                          {secondaryDriver.name}
-                        </span>
+                        <>
+                          <span className="text-muted-foreground">vs</span>
+                          <DriverNameWithTeamColors
+                            driver={secondaryDriver}
+                            team={secondaryTeam}
+                            nameFallback="Unknown"
+                            nameClassName="truncate"
+                          />
+                        </>
                       )}
                     </div>
                     <span className="text-[10px] text-right text-muted-foreground max-w-[40%] truncate">
