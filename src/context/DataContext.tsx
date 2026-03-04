@@ -1,10 +1,11 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import type { Driver, Team, RaceConfig } from '@/types/game';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { Driver, Team, RaceConfig, SavedRaceSummary } from '@/types/game';
 import { INITIAL_DRIVERS, INITIAL_TEAMS } from '@/lib/simulation/data';
 
 type DataContextValue = {
   teams: Team[];
   drivers: Driver[];
+  raceHistory: SavedRaceSummary[];
   selectedRaceDriverIds: string[] | null;
   setSelectedRaceDriverIds: (value: string[] | null | ((prev: string[] | null) => string[] | null)) => void;
   raceConfig: RaceConfig | null;
@@ -18,9 +19,27 @@ type DataContextValue = {
   getTeamById: (id: string) => Team | undefined;
   getDriverById: (id: string) => Driver | undefined;
   getDriversByTeamId: (teamId: string) => Driver[];
+  addRaceToHistory: (race: SavedRaceSummary) => void;
+  deleteRaceFromHistory: (id: string) => void;
 };
 
 const DataContext = createContext<DataContextValue | null>(null);
+
+const STORAGE_KEYS = {
+  teams: 'f1dnd_teams',
+  drivers: 'f1dnd_drivers',
+  raceHistory: 'f1dnd_race_history',
+} as const;
+
+function safeParseJSON<T>(value: string | null, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    const parsed = JSON.parse(value) as T;
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function nextId(prefix: string, existing: { id: string }[]): string {
   const max = existing.reduce((acc, e) => {
@@ -32,20 +51,42 @@ function nextId(prefix: string, existing: { id: string }[]): string {
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [teams, setTeams] = useState<Team[]>(() =>
-    INITIAL_TEAMS.map(t => ({
+  const [teams, setTeams] = useState<Team[]>(() => {
+    const stored = safeParseJSON<Team[]>(typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEYS.teams) : null, []);
+    const base = stored.length > 0 ? stored : INITIAL_TEAMS;
+    return base.map(t => ({
       ...t,
       traitId: t.traitId ?? t.trait ?? null,
-    }))
-  );
-  const [drivers, setDrivers] = useState<Driver[]>(() =>
-    INITIAL_DRIVERS.map(d => ({
+    }));
+  });
+  const [drivers, setDrivers] = useState<Driver[]>(() => {
+    const stored = safeParseJSON<Driver[]>(typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEYS.drivers) : null, []);
+    const base = stored.length > 0 ? stored : INITIAL_DRIVERS;
+    return base.map(d => ({
       ...d,
       traitId: d.traitId ?? d.trait ?? null,
-    }))
+    }));
+  });
+  const [raceHistory, setRaceHistory] = useState<SavedRaceSummary[]>(() =>
+    safeParseJSON<SavedRaceSummary[]>(typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEYS.raceHistory) : null, [])
   );
   const [selectedRaceDriverIds, setSelectedRaceDriverIds] = useState<string[] | null>(null);
-   const [raceConfig, setRaceConfig] = useState<RaceConfig | null>(null);
+  const [raceConfig, setRaceConfig] = useState<RaceConfig | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEYS.teams, JSON.stringify(teams));
+  }, [teams]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEYS.drivers, JSON.stringify(drivers));
+  }, [drivers]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEYS.raceHistory, JSON.stringify(raceHistory));
+  }, [raceHistory]);
 
   const getTeamById = useCallback(
     (id: string) => teams.find(t => t.id === id),
@@ -109,10 +150,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const addRaceToHistory = useCallback((race: SavedRaceSummary) => {
+    setRaceHistory(prev => {
+      const next = [race, ...prev];
+      return next.slice(0, 50);
+    });
+  }, []);
+
+  const deleteRaceFromHistory = useCallback((id: string) => {
+    setRaceHistory(prev => prev.filter(r => r.id !== id));
+  }, []);
+
   const value = useMemo<DataContextValue>(
     () => ({
       teams,
       drivers,
+      raceHistory,
       selectedRaceDriverIds,
       setSelectedRaceDriverIds,
       raceConfig,
@@ -126,10 +179,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       getTeamById,
       getDriverById,
       getDriversByTeamId,
+      addRaceToHistory,
+      deleteRaceFromHistory,
     }),
     [
       teams,
       drivers,
+      raceHistory,
       selectedRaceDriverIds,
       raceConfig,
       addTeam,
@@ -141,6 +197,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       getTeamById,
       getDriverById,
       getDriversByTeamId,
+      addRaceToHistory,
+      deleteRaceFromHistory,
     ]
   );
 

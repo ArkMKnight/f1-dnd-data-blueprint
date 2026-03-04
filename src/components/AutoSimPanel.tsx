@@ -3,11 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Driver, Car, Track, Team, RaceConfig, TyreCompound } from '@/types/game';
+import type { Driver, Car, Track, Team, RaceConfig, TyreCompound, SavedRaceSummary } from '@/types/game';
 import { simulateFullRace, type RaceState } from '@/lib/simulation/race-engine';
 import { getTrackMatchScore, getTrackCompatibilityModifier } from '@/lib/simulation/track-compatibility';
 import { DriverNameWithTeamColors } from '@/components/DriverNameWithTeamColors';
 import { LiveRaceEventFeed } from '@/components/LiveRaceEventFeed';
+import { useData } from '@/context/DataContext';
 
 interface AutoSimPanelProps {
   track: Track;
@@ -24,6 +25,8 @@ const MAX_LAPS = 200;
 const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRaceConfig }: AutoSimPanelProps) => {
   const [result, setResult] = useState<RaceState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [hasSavedCurrentResult, setHasSavedCurrentResult] = useState(false);
+  const { addRaceToHistory } = useData();
 
   const [startingCompounds, setStartingCompounds] = useState<Record<string, TyreCompound | null>>(
     () => Object.fromEntries(drivers.map(d => [d.id, null as TyreCompound | null]))
@@ -157,6 +160,7 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     });
 
     setIsRunning(true);
+    setHasSavedCurrentResult(false);
     // Use setTimeout to allow UI update
     setTimeout(() => {
       const res = simulateFullRace(
@@ -173,6 +177,37 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
       setIsRunning(false);
     }, 50);
   }, [drivers, cars, teams, lapInput, setRaceConfig, startingCompounds, strategy, track, validateLapCount]);
+
+  const handleSaveResult = useCallback(() => {
+    if (!result) return;
+    const createdAt = Date.now();
+    const standingsWithMeta = result.standings
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map(s => {
+        const driver = drivers.find(d => d.id === s.driverId) ?? null;
+        const team = driver ? teams.find(t => t.id === driver.teamId) ?? null : null;
+        return {
+          driverId: s.driverId,
+          driverName: driver?.name ?? s.driverId,
+          teamId: team?.id ?? null,
+          teamName: team?.name ?? null,
+          position: s.position,
+          isDNF: s.isDNF,
+        };
+      });
+    const summary: SavedRaceSummary = {
+      id: `auto-${track.id}-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt,
+      mode: 'auto',
+      trackId: track.id,
+      trackName: track.name,
+      totalLaps: result.totalLaps,
+      standings: standingsWithMeta,
+    };
+    addRaceToHistory(summary);
+    setHasSavedCurrentResult(true);
+  }, [addRaceToHistory, drivers, result, teams, track.id, track.name]);
 
   return (
     <div className="space-y-4">
@@ -367,7 +402,17 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
           {/* Final standings */}
           <Card>
             <CardHeader className="py-3">
-              <CardTitle className="text-sm">Final Results</CardTitle>
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span>Final Results</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={hasSavedCurrentResult}
+                  onClick={handleSaveResult}
+                >
+                  {hasSavedCurrentResult ? 'Saved to History' : 'Save to History'}
+                </Button>
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y">

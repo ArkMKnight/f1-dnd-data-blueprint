@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Driver, Car, Track, RaceConfig, Team, TyreCompound } from '@/types/game';
+import type { Driver, Car, Track, RaceConfig, Team, TyreCompound, SavedRaceSummary } from '@/types/game';
 import type { DamageState } from '@/types/game';
 import { initGMSession, advanceGMState, type GMState, type ActivationOption } from '@/lib/simulation/gm-engine';
 import { reorderGridWithEvent } from '@/lib/simulation/race-engine';
@@ -26,6 +26,7 @@ import {
 import { assignTyreCompoundForSelection } from '@/lib/simulation/tyre-system';
 import { cn } from '@/lib/utils';
 import { ChevronDown } from 'lucide-react';
+import { useData } from '@/context/DataContext';
 
 /** Background/border shade for tyre compound badges (text colour unchanged). */
 const COMPOUND_BADGE_CLASS: Record<TyreCompound, string> = {
@@ -72,6 +73,8 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     )
   );
   const [strategyError, setStrategyError] = useState<string | null>(null);
+  const [hasSavedCurrentRace, setHasSavedCurrentRace] = useState(false);
+  const { addRaceToHistory } = useData();
 
   const effectiveLapCount = useMemo(
     () => (raceConfig && raceConfig.trackId === track.id ? raceConfig.lapCount : track.lapCount),
@@ -198,6 +201,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     const advanced = advanceGMState(session);
     setGmState(advanced);
     setIsStarted(true);
+    setHasSavedCurrentRace(false);
   }, [cars, drivers, lapInput, setRaceConfig, startingCompounds, strategy, track, validateLapCount]);
 
   const handleSubmitRoll = useCallback(() => {
@@ -322,6 +326,39 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     const newRaceState = { ...race, standings: newStandings };
     setGmState({ ...gmState, raceState: newRaceState });
   }, [gmState]);
+
+  const handleSaveRace = useCallback(() => {
+    if (!gmState) return;
+    const race = gmState.raceState;
+    if (!race.isComplete) return;
+    const createdAt = Date.now();
+    const standingsWithMeta = race.standings
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map(s => {
+        const driver = race.drivers.find(d => d.id === s.driverId) ?? null;
+        const team = driver ? teams.find(t => t.id === driver.teamId) ?? null : null;
+        return {
+          driverId: s.driverId,
+          driverName: driver?.name ?? s.driverId,
+          teamId: team?.id ?? null,
+          teamName: team?.name ?? null,
+          position: s.position,
+          isDNF: s.isDNF,
+        };
+      });
+    const summary: SavedRaceSummary = {
+      id: `gm-${track.id}-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt,
+      mode: 'gm',
+      trackId: track.id,
+      trackName: track.name,
+      totalLaps: race.totalLaps,
+      standings: standingsWithMeta,
+    };
+    addRaceToHistory(summary);
+    setHasSavedCurrentRace(true);
+  }, [addRaceToHistory, gmState, teams, track.id, track.name]);
 
   const handleStandingsDragStart = useCallback((driverId: string) => {
     return (event: React.DragEvent<HTMLDivElement>) => {
@@ -816,6 +853,19 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
           </CollapsibleContent>
         </Card>
       </Collapsible>
+
+      {race.isComplete && (
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={hasSavedCurrentRace}
+            onClick={handleSaveRace}
+          >
+            {hasSavedCurrentRace ? 'Saved to History' : 'Save Race to History'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

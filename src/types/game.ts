@@ -187,6 +187,31 @@ export interface RaceEvent {
   timestamp: number;
 }
 
+// ============================================
+// SAVED RACE HISTORY
+// ============================================
+
+export type RaceMode = 'auto' | 'gm';
+
+export interface SavedRaceStanding {
+  driverId: string;
+  driverName: string;
+  teamId: string | null;
+  teamName: string | null;
+  position: number;
+  isDNF: boolean;
+}
+
+export interface SavedRaceSummary {
+  id: string;
+  createdAt: number;
+  mode: RaceMode;
+  trackId: string;
+  trackName: string;
+  totalLaps: number;
+  standings: SavedRaceStanding[];
+}
+
 // Track-specific tyre degradation configuration
 export interface TyreCompoundConfig {
   effectiveLapRangeStart: number;  // First lap of optimal performance

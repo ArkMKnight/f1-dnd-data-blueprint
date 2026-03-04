@@ -12,6 +12,7 @@ import { paceModifierFromStat, racecraftModifierFromStat, getTrackMatchScore, ge
 import { useData } from '@/context/DataContext';
 import { GMModePanel } from '@/components/GMModePanel';
 import { AutoSimPanel } from '@/components/AutoSimPanel';
+import { RaceHistoryPanel } from '@/components/RaceHistoryPanel';
 import { DriverSelectionPanel } from '@/components/DriverSelectionPanel';
 
 const Index = () => {
@@ -110,6 +111,7 @@ const Index = () => {
             <TabsTrigger value="drivers">Drivers & Cars</TabsTrigger>
             <TabsTrigger value="auto">Auto Sim</TabsTrigger>
             <TabsTrigger value="gm">GM Mode</TabsTrigger>
+            <TabsTrigger value="history">Race History</TabsTrigger>
           </TabsList>
 
           {/* Drivers & Cars tab */}
@@ -275,6 +277,11 @@ const Index = () => {
                 />
               </>
             )}
+          </TabsContent>
+
+          {/* Race History tab */}
+          <TabsContent value="history" className="space-y-4">
+            <RaceHistoryPanel />
           </TabsContent>
         </Tabs>
       </div>
