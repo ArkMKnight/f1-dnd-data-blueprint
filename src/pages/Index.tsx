@@ -131,10 +131,10 @@ const Index = () => {
                       <TableHead>Driver</TableHead>
                       <TableHead>Team</TableHead>
                       <TableHead className="text-center">PAC</TableHead>
-                      <TableHead className="text-center">QUA</TableHead>
                       <TableHead className="text-center">RAC</TableHead>
                       <TableHead className="text-center">AWR</TableHead>
                       <TableHead className="text-center">ADP</TableHead>
+                      <TableHead className="text-center">QUA</TableHead>
                       <TableHead className="text-center">Car Mod</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -151,9 +151,6 @@ const Index = () => {
                             <StatCell raw={driver.pace} mod={paceModifierFromStat(driver.pace)} carMod={carMod} affected />
                           </TableCell>
                           <TableCell className="text-center">
-                            <StatCell raw={driver.qualifying} mod={0} carMod={0} affected={false} showMod={false} />
-                          </TableCell>
-                          <TableCell className="text-center">
                             <StatCell raw={driver.racecraft} mod={racecraftModifierFromStat(driver.racecraft)} carMod={carMod} affected />
                           </TableCell>
                           <TableCell className="text-center">
@@ -161,6 +158,9 @@ const Index = () => {
                           </TableCell>
                           <TableCell className="text-center">
                             <StatCell raw={driver.adaptability} mod={0} carMod={0} affected={false} showMod={false} />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <StatCell raw={driver.qualifying} mod={0} carMod={0} affected={false} showMod={false} />
                           </TableCell>
                           <TableCell className="text-center">
                             {car && (
@@ -190,8 +190,8 @@ const Index = () => {
                       <TableHead className="text-center">LowSpd</TableHead>
                       <TableHead className="text-center">MedSpd</TableHead>
                       <TableHead className="text-center">HiSpd</TableHead>
-                      <TableHead className="text-center">TopSpd</TableHead>
                       <TableHead className="text-center">Accel</TableHead>
+                      <TableHead className="text-center">TopSpd</TableHead>
                       <TableHead className="text-center">Match Score</TableHead>
                       <TableHead className="text-center">Modifier</TableHead>
                     </TableRow>
@@ -207,8 +207,8 @@ const Index = () => {
                           <TableCell className="text-center font-mono text-xs">{car.lowSpeedCornering}</TableCell>
                           <TableCell className="text-center font-mono text-xs">{car.mediumSpeedCornering}</TableCell>
                           <TableCell className="text-center font-mono text-xs">{car.highSpeedCornering}</TableCell>
-                          <TableCell className="text-center font-mono text-xs">{car.topSpeed}</TableCell>
                           <TableCell className="text-center font-mono text-xs">{car.acceleration}</TableCell>
+                          <TableCell className="text-center font-mono text-xs">{car.topSpeed}</TableCell>
                           <TableCell className="text-center">
                             <span className="font-mono font-bold">{score}</span>
                           </TableCell>
