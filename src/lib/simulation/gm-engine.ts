@@ -142,9 +142,10 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           tr.usedThisHalf = false;
         });
       }
-      // Experimental Parts: one d6 every 5th lap in second half (inclusive); prompt GM to roll or submit (like Opportunity roll)
+      // Experimental Parts: one d6 every 5th lap in the second half; skip the first trigger at halfway.
       const secondHalfStart = Math.ceil(race.totalLaps / 2);
-      const isExpPartsTriggerLap = currentLapNum >= secondHalfStart && currentLapNum % 5 === 0;
+      const isExpPartsTriggerLap =
+        currentLapNum > secondHalfStart && (currentLapNum - secondHalfStart) % 5 === 0;
       if (isExpPartsTriggerLap && state.teams.length > 0) {
         const driverEntries: { driverId: string; driverName: string }[] = [];
         for (const s of race.standings) {
@@ -924,7 +925,42 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
     }
   });
 
-  const overtakeSuccess = aTotal > dTotal;
+  // Criticals based on raw d20 (not totals).
+  const attackerCritSuccess = attackerRoll === 20;
+  const defenderCritSuccess = defenderRoll === 20;
+  const attackerCritFailure = attackerRoll === 1;
+  const defenderCritFailure = defenderRoll === 1;
+
+  type CritOutcome =
+    | 'none'
+    | 'attackerCritSuccess'
+    | 'defenderCritSuccess'
+    | 'attackerCritFailure'
+    | 'defenderCritFailure';
+
+  let critOutcome: CritOutcome = 'none';
+  if (attackerCritSuccess && !defenderCritSuccess) critOutcome = 'attackerCritSuccess';
+  else if (defenderCritSuccess && !attackerCritSuccess) critOutcome = 'defenderCritSuccess';
+  else if (attackerCritFailure && !defenderCritFailure) critOutcome = 'attackerCritFailure';
+  else if (defenderCritFailure && !attackerCritFailure) critOutcome = 'defenderCritFailure';
+
+  let overtakeSuccess: boolean;
+  switch (critOutcome) {
+    case 'attackerCritSuccess':
+      overtakeSuccess = true;
+      break;
+    case 'defenderCritSuccess':
+      overtakeSuccess = false;
+      break;
+    case 'attackerCritFailure':
+      overtakeSuccess = false;
+      break;
+    case 'defenderCritFailure':
+      overtakeSuccess = true;
+      break;
+    default:
+      overtakeSuccess = aTotal > dTotal;
+  }
 
   const aTraitPhase2 = attackerTraitResult.result.phase2Delta;
   const aTraitPhase3 = attackerTraitResult.result.phase3Delta - aDmg - aPuncture;
@@ -952,6 +988,49 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
     type: 'contested_roll',
     description: `${attacker.name}: d20(${attackerRoll}) + ${aPaceLog} + racecraft(${aRacecraftDisplay})${attackerTraitsLabel}${aExtra ? ` + ${aExtra}` : ''} = ${aTotal} vs ${defender.name}: d20(${defenderRoll}) + ${dPaceLog} + racecraft(${dRacecraftDisplay})${defenderTraitsLabel}${dExtra ? ` + ${dExtra}` : ''} = ${dTotal} → ${overtakeSuccess ? 'OVERTAKE' : 'DEFENDED'}`,
   });
+
+  // Live Race Events for GM-mode criticals.
+  switch (critOutcome) {
+    case 'attackerCritSuccess':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Success: ${attacker.name} rolls a natural 20 attacking ${defender.name}.`,
+        primaryDriverId: attacker.id,
+        secondaryDriverId: defender.id,
+      });
+      break;
+    case 'defenderCritSuccess':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Success: ${defender.name} rolls a natural 20 defending from ${attacker.name}.`,
+        primaryDriverId: defender.id,
+        secondaryDriverId: attacker.id,
+      });
+      break;
+    case 'attackerCritFailure':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Failure: ${attacker.name} rolls a natural 1 while attacking ${defender.name}.`,
+        primaryDriverId: attacker.id,
+        secondaryDriverId: defender.id,
+      });
+      break;
+    case 'defenderCritFailure':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Failure: ${defender.name} rolls a natural 1 while defending from ${attacker.name}.`,
+        primaryDriverId: defender.id,
+        secondaryDriverId: attacker.id,
+      });
+      break;
+    case 'none':
+    default:
+      break;
+  }
 
   const attackerTraitId = attacker.traitId ?? attacker.trait ?? null;
   const hasRelentless = attackerTraitId === 'relentless';
@@ -1219,7 +1298,42 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
     }
   });
 
-  const overtakeSuccess = aTotal > dTotal;
+  // Criticals on Relentless retry (GM) based on raw d20.
+  const attackerCritSuccess = attackerRoll === 20;
+  const defenderCritSuccess = defenderRoll === 20;
+  const attackerCritFailure = attackerRoll === 1;
+  const defenderCritFailure = defenderRoll === 1;
+
+  type RetryCritOutcome =
+    | 'none'
+    | 'attackerCritSuccess'
+    | 'defenderCritSuccess'
+    | 'attackerCritFailure'
+    | 'defenderCritFailure';
+
+  let critOutcome: RetryCritOutcome = 'none';
+  if (attackerCritSuccess && !defenderCritSuccess) critOutcome = 'attackerCritSuccess';
+  else if (defenderCritSuccess && !attackerCritSuccess) critOutcome = 'defenderCritSuccess';
+  else if (attackerCritFailure && !defenderCritFailure) critOutcome = 'attackerCritFailure';
+  else if (defenderCritFailure && !attackerCritFailure) critOutcome = 'defenderCritFailure';
+
+  let overtakeSuccess: boolean;
+  switch (critOutcome) {
+    case 'attackerCritSuccess':
+      overtakeSuccess = true;
+      break;
+    case 'defenderCritSuccess':
+      overtakeSuccess = false;
+      break;
+    case 'attackerCritFailure':
+      overtakeSuccess = false;
+      break;
+    case 'defenderCritFailure':
+      overtakeSuccess = true;
+      break;
+    default:
+      overtakeSuccess = aTotal > dTotal;
+  }
 
   const aTraitPhase2 = attackerTraitResult.result.phase2Delta;
   const aTraitPhase3 = attackerTraitResult.result.phase3Delta - (aDmg + aPuncture - 1);
@@ -1268,6 +1382,49 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
       primaryDriverId: defender.id,
       secondaryDriverId: attacker.id,
     });
+  }
+
+  // Live Race Events for criticals on the Relentless retry.
+  switch (critOutcome) {
+    case 'attackerCritSuccess':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Success: ${attacker.name} rolls a natural 20 on Relentless retry against ${defender.name}.`,
+        primaryDriverId: attacker.id,
+        secondaryDriverId: defender.id,
+      });
+      break;
+    case 'defenderCritSuccess':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Success: ${defender.name} rolls a natural 20 defending a Relentless retry from ${attacker.name}.`,
+        primaryDriverId: defender.id,
+        secondaryDriverId: attacker.id,
+      });
+      break;
+    case 'attackerCritFailure':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Failure: ${attacker.name} rolls a natural 1 on Relentless retry against ${defender.name}.`,
+        primaryDriverId: attacker.id,
+        secondaryDriverId: defender.id,
+      });
+      break;
+    case 'defenderCritFailure':
+      appendLiveRaceEvent(race, {
+        lapNumber: race.currentLap,
+        type: 'incident',
+        description: `Critical Failure: ${defender.name} rolls a natural 1 defending a Relentless retry from ${attacker.name}.`,
+        primaryDriverId: defender.id,
+        secondaryDriverId: attacker.id,
+      });
+      break;
+    case 'none':
+    default:
+      break;
   }
 
   // Forced awareness on retry: prompt for d6 in GM mode (no createDiceResult here)

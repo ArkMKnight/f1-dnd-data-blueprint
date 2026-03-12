@@ -23,7 +23,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { assignTyreCompoundForSelection } from '@/lib/simulation/tyre-system';
+import { assignTyreCompoundForSelection, getTyreStatus } from '@/lib/simulation/tyre-system';
 import { cn } from '@/lib/utils';
 import { ChevronDown } from 'lucide-react';
 import { useData } from '@/context/DataContext';
@@ -35,6 +35,35 @@ const COMPOUND_BADGE_CLASS: Record<TyreCompound, string> = {
   hard: 'bg-stone-200/80 dark:bg-stone-500/30 border-stone-400/50 dark:border-stone-500/50',
   intermediate: 'bg-green-500/20 border-green-500/50',
   wet: 'bg-blue-500/20 border-blue-500/50',
+};
+
+const formatTyreLabel = (
+  track: Track,
+  compound: TyreCompound,
+  currentLapOnTyre: number
+): string => {
+  const status = getTyreStatus(track, compound, currentLapOnTyre);
+  const statusLabel =
+    status === 'fresh'
+      ? 'Fresh'
+      : status === 'base'
+      ? 'Base'
+      : status === 'worn'
+      ? 'Worn'
+      : 'Dead';
+
+  const compoundLabel =
+    compound === 'soft'
+      ? 'Softs'
+      : compound === 'medium'
+      ? 'Mediums'
+      : compound === 'hard'
+      ? 'Hards'
+      : compound === 'intermediate'
+      ? 'Inters'
+      : 'Wets';
+
+  return `${statusLabel} ${compoundLabel}`;
 };
 
 interface GMModePanelProps {
@@ -853,8 +882,11 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className={cn('text-xs', COMPOUND_BADGE_CLASS[s.tyreState.compound])}>
-                              {s.tyreState.compound}
+                            <Badge
+                              variant="outline"
+                              className={cn('text-xs', COMPOUND_BADGE_CLASS[s.tyreState.compound])}
+                            >
+                              {formatTyreLabel(race.track, s.tyreState.compound, s.tyreState.currentLap)}
                             </Badge>
                             {s.damageState.state !== 'none' && (
                               <Badge variant="destructive" className="text-xs">

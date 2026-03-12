@@ -307,9 +307,10 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     traitRuntime.halfIndex = lap > newState.totalLaps / 2 ? 2 : 1;
   }
 
-  // Experimental Parts: one d6 every 5th lap in second half (inclusive); track 1s per driver; DNF when same driver gets 2nd 1
+  // Experimental Parts: one d6 every 5th lap in the second half; skip the first trigger at halfway.
   const secondHalfStart = Math.ceil(newState.totalLaps / 2);
-  const shouldRunExperimentalParts = lap >= secondHalfStart && lap % 5 === 0;
+  const shouldRunExperimentalParts =
+    lap > secondHalfStart && (lap - secondHalfStart) % 5 === 0;
   if (shouldRunExperimentalParts && teams && teams.length > 0) {
     const ones = newState.experimentalPartsOnes;
     standings.forEach(s => {
@@ -551,7 +552,42 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
       defenderTotal = dRoll.roll + defenderPaceMod + defenderRacecraftMod + defenderDmgMod + defenderPunctureMod;
     }
 
-    const overtakeSuccess = attackerTotal > defenderTotal;
+    // Criticals are based on the raw d20 roll (not the total).
+    const attackerCritSuccess = aRoll.roll === 20;
+    const defenderCritSuccess = dRoll.roll === 20;
+    const attackerCritFailure = aRoll.roll === 1;
+    const defenderCritFailure = dRoll.roll === 1;
+
+    type CritOutcome =
+      | 'none'
+      | 'attackerCritSuccess'
+      | 'defenderCritSuccess'
+      | 'attackerCritFailure'
+      | 'defenderCritFailure';
+
+    let critOutcome: CritOutcome = 'none';
+    if (attackerCritSuccess && !defenderCritSuccess) critOutcome = 'attackerCritSuccess';
+    else if (defenderCritSuccess && !attackerCritSuccess) critOutcome = 'defenderCritSuccess';
+    else if (attackerCritFailure && !defenderCritFailure) critOutcome = 'attackerCritFailure';
+    else if (defenderCritFailure && !attackerCritFailure) critOutcome = 'defenderCritFailure';
+
+    let overtakeSuccess: boolean;
+    switch (critOutcome) {
+      case 'attackerCritSuccess':
+        overtakeSuccess = true;
+        break;
+      case 'defenderCritSuccess':
+        overtakeSuccess = false;
+        break;
+      case 'attackerCritFailure':
+        overtakeSuccess = false;
+        break;
+      case 'defenderCritFailure':
+        overtakeSuccess = true;
+        break;
+      default:
+        overtakeSuccess = attackerTotal > defenderTotal;
+    }
 
     const aPaceLog = attackerTyreMods.paceDelta !== 0
       ? `pace(${attackerBasePaceMod}) + tyre(${attackerTyreMods.paceDelta >= 0 ? '+' : ''}${attackerTyreMods.paceDelta})`
@@ -567,6 +603,49 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
       type: 'contested_roll',
       description: `${attacker.name}: d20(${aRoll.roll}) + ${aPaceLog} + racecraft(${attackerRacecraftMod})${attackerTraitsLabel}${aExtra ? ` + ${aExtra}` : ''} = ${attackerTotal} vs ${defender.name}: d20(${dRoll.roll}) + ${dPaceLog} + racecraft(${defenderRacecraftMod})${defenderTraitsLabel}${dExtra ? ` + ${dExtra}` : ''} = ${defenderTotal} → ${overtakeSuccess ? 'OVERTAKE' : 'DEFENDED'}`,
     });
+
+    // Live Race Events: surface critical successes/failures explicitly.
+    switch (critOutcome) {
+      case 'attackerCritSuccess':
+        appendLiveRaceEvent(newState, {
+          lapNumber: lap,
+          type: 'incident',
+          description: `Critical Success: ${attacker.name} rolls a natural 20 attacking ${defender.name}.`,
+          primaryDriverId: attacker.id,
+          secondaryDriverId: defender.id,
+        });
+        break;
+      case 'defenderCritSuccess':
+        appendLiveRaceEvent(newState, {
+          lapNumber: lap,
+          type: 'incident',
+          description: `Critical Success: ${defender.name} rolls a natural 20 defending from ${attacker.name}.`,
+          primaryDriverId: defender.id,
+          secondaryDriverId: attacker.id,
+        });
+        break;
+      case 'attackerCritFailure':
+        appendLiveRaceEvent(newState, {
+          lapNumber: lap,
+          type: 'incident',
+          description: `Critical Failure: ${attacker.name} rolls a natural 1 while attacking ${defender.name}.`,
+          primaryDriverId: attacker.id,
+          secondaryDriverId: defender.id,
+        });
+        break;
+      case 'defenderCritFailure':
+        appendLiveRaceEvent(newState, {
+          lapNumber: lap,
+          type: 'incident',
+          description: `Critical Failure: ${defender.name} rolls a natural 1 while defending from ${attacker.name}.`,
+          primaryDriverId: defender.id,
+          secondaryDriverId: attacker.id,
+        });
+        break;
+      case 'none':
+      default:
+        break;
+    }
 
     if (overtakeSuccess) {
       const defenderTeamRef = teams?.find(t => t.id === defender.teamId);
@@ -871,13 +950,91 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             defenderPunctureMod;
         }
 
-        const retrySuccess = retryAttackerTotal > retryDefenderTotal;
+        // Criticals on Relentless retry are also based on raw d20.
+        const retryAttackerCritSuccess = retryAttackerRoll.roll === 20;
+        const retryDefenderCritSuccess = retryDefenderRoll.roll === 20;
+        const retryAttackerCritFailure = retryAttackerRoll.roll === 1;
+        const retryDefenderCritFailure = retryDefenderRoll.roll === 1;
+
+        type RetryCritOutcome =
+          | 'none'
+          | 'attackerCritSuccess'
+          | 'defenderCritSuccess'
+          | 'attackerCritFailure'
+          | 'defenderCritFailure';
+
+        let retryCritOutcome: RetryCritOutcome = 'none';
+        if (retryAttackerCritSuccess && !retryDefenderCritSuccess) retryCritOutcome = 'attackerCritSuccess';
+        else if (retryDefenderCritSuccess && !retryAttackerCritSuccess) retryCritOutcome = 'defenderCritSuccess';
+        else if (retryAttackerCritFailure && !retryDefenderCritFailure) retryCritOutcome = 'attackerCritFailure';
+        else if (retryDefenderCritFailure && !retryAttackerCritFailure) retryCritOutcome = 'defenderCritFailure';
+
+        let retrySuccess: boolean;
+        switch (retryCritOutcome) {
+          case 'attackerCritSuccess':
+            retrySuccess = true;
+            break;
+          case 'defenderCritSuccess':
+            retrySuccess = false;
+            break;
+          case 'attackerCritFailure':
+            retrySuccess = false;
+            break;
+          case 'defenderCritFailure':
+            retrySuccess = true;
+            break;
+          default:
+            retrySuccess = retryAttackerTotal > retryDefenderTotal;
+        }
 
         newState.eventLog.push({
           lap,
           type: 'contested_roll',
         description: `${attacker.name} (Relentless retry): d20(${retryAttackerRoll.roll}) + pace(${attackerPaceMod}) + racecraft(${attackerRacecraftMod})${retryAttackerTraitsLabel}${attackerDmgMod ? ` + dmg(${attackerDmgMod})` : ''}${attackerPunctureMod ? ` + tyre(${attackerPunctureMod})` : ''} - 1(relentless) = ${retryAttackerTotal} vs ${defender.name}: d20(${retryDefenderRoll.roll}) + pace(${defenderPaceMod}) + racecraft(${defenderRacecraftMod})${retryDefenderTraitsLabel}${defenderDmgMod ? ` + dmg(${defenderDmgMod})` : ''}${defenderPunctureMod ? ` + tyre(${defenderPunctureMod})` : ''} = ${retryDefenderTotal} → ${retrySuccess ? 'OVERTAKE' : 'DEFENDED'}`,
         });
+
+        // Live Race Events for critical outcomes on the retry.
+        switch (retryCritOutcome) {
+          case 'attackerCritSuccess':
+            appendLiveRaceEvent(newState, {
+              lapNumber: lap,
+              type: 'incident',
+              description: `Critical Success: ${attacker.name} rolls a natural 20 on Relentless retry against ${defender.name}.`,
+              primaryDriverId: attacker.id,
+              secondaryDriverId: defender.id,
+            });
+            break;
+          case 'defenderCritSuccess':
+            appendLiveRaceEvent(newState, {
+              lapNumber: lap,
+              type: 'incident',
+              description: `Critical Success: ${defender.name} rolls a natural 20 defending a Relentless retry from ${attacker.name}.`,
+              primaryDriverId: defender.id,
+              secondaryDriverId: attacker.id,
+            });
+            break;
+          case 'attackerCritFailure':
+            appendLiveRaceEvent(newState, {
+              lapNumber: lap,
+              type: 'incident',
+              description: `Critical Failure: ${attacker.name} rolls a natural 1 on Relentless retry against ${defender.name}.`,
+              primaryDriverId: attacker.id,
+              secondaryDriverId: defender.id,
+            });
+            break;
+          case 'defenderCritFailure':
+            appendLiveRaceEvent(newState, {
+              lapNumber: lap,
+              type: 'incident',
+              description: `Critical Failure: ${defender.name} rolls a natural 1 defending a Relentless retry from ${attacker.name}.`,
+              primaryDriverId: defender.id,
+              secondaryDriverId: attacker.id,
+            });
+            break;
+          case 'none':
+          default:
+            break;
+        }
 
         if (retrySuccess) {
           const aPos = attackerState.position;
