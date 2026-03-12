@@ -39,7 +39,6 @@ export function buildCarFromTeam(team: Team): Car {
   };
 }
 
-/** Build Car[] for race engine from teams that have at least one of the given drivers. */
 export function getCarsForDrivers(teams: Team[], drivers: Driver[]): Car[] {
   const teamIds = [...new Set(drivers.map(d => d.teamId))];
   return teamIds
@@ -53,24 +52,37 @@ export function getCarsForDrivers(teams: Team[], drivers: Driver[]): Car[] {
 // ============================================
 
 export const INITIAL_TEAMS: Team[] = [
-  { id: 't1', name: 'Red Bull Racing', teamPrincipal: 'Christian Horner', primaryColor: '#0600EF', secondaryColor: '#FFD700', lowSpeedCornering: 150, mediumSpeedCornering: 160, highSpeedCornering: 170, topSpeed: 175, acceleration: 165, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
-  { id: 't2', name: 'Mercedes', teamPrincipal: 'Toto Wolff', primaryColor: '#00D2BE', secondaryColor: '#000000', lowSpeedCornering: 145, mediumSpeedCornering: 155, highSpeedCornering: 165, topSpeed: 170, acceleration: 160, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
-  { id: 't3', name: 'Ferrari', teamPrincipal: 'Frédéric Vasseur', primaryColor: '#DC0000', secondaryColor: '#FFFFFF', lowSpeedCornering: 155, mediumSpeedCornering: 150, highSpeedCornering: 160, topSpeed: 165, acceleration: 155, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
-  { id: 't4', name: 'McLaren', teamPrincipal: 'Andrea Stella', primaryColor: '#FF8700', secondaryColor: '#000000', lowSpeedCornering: 140, mediumSpeedCornering: 155, highSpeedCornering: 160, topSpeed: 170, acceleration: 155, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
-  { id: 't5', name: 'Aston Martin', teamPrincipal: 'Mike Krack', primaryColor: '#006F62', secondaryColor: '#C0C0C0', lowSpeedCornering: 135, mediumSpeedCornering: 140, highSpeedCornering: 145, topSpeed: 155, acceleration: 140, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't1', name: 'Ford Motorsport', teamPrincipal: '', primaryColor: '#3B6BBF', secondaryColor: '#FFFFFF', lowSpeedCornering: 75, mediumSpeedCornering: 50, highSpeedCornering: 100, topSpeed: 85, acceleration: 90, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't2', name: 'Aurora Bombardier', teamPrincipal: '', primaryColor: '#8AAAC7', secondaryColor: '#FFFFFF', lowSpeedCornering: 25, mediumSpeedCornering: 75, highSpeedCornering: 25, topSpeed: 50, acceleration: 75, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't3', name: 'Magnus F1 Team', teamPrincipal: '', primaryColor: '#A6C9AC', secondaryColor: '#FFFFFF', lowSpeedCornering: 75, mediumSpeedCornering: 75, highSpeedCornering: 0, topSpeed: 75, acceleration: 25, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't4', name: 'DevOps', teamPrincipal: '', primaryColor: '#000000', secondaryColor: '#FFFFFF', lowSpeedCornering: 50, mediumSpeedCornering: 50, highSpeedCornering: 100, topSpeed: 100, acceleration: 100, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't5', name: 'Pemberley Racing', teamPrincipal: '', primaryColor: '#6F3FA3', secondaryColor: '#FFFFFF', lowSpeedCornering: 50, mediumSpeedCornering: 50, highSpeedCornering: 25, topSpeed: 50, acceleration: 75, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't6', name: 'Shard Motorsports', teamPrincipal: '', primaryColor: '#E7D28C', secondaryColor: '#000000', lowSpeedCornering: 75, mediumSpeedCornering: 75, highSpeedCornering: 75, topSpeed: 75, acceleration: 100, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't7', name: 'Bayern Motorworks', teamPrincipal: '', primaryColor: '#E87A33', secondaryColor: '#FFFFFF', lowSpeedCornering: 30, mediumSpeedCornering: 30, highSpeedCornering: 30, topSpeed: 30, acceleration: 30, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't8', name: 'Takahashi Taikyu', teamPrincipal: '', primaryColor: '#D8D8D8', secondaryColor: '#000000', lowSpeedCornering: 25, mediumSpeedCornering: 25, highSpeedCornering: 25, topSpeed: 50, acceleration: 25, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't9', name: 'Ecurie Voltaire', teamPrincipal: '', primaryColor: '#9C9C9C', secondaryColor: '#FFFFFF', lowSpeedCornering: 50, mediumSpeedCornering: 50, highSpeedCornering: 50, topSpeed: 0, acceleration: 0, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
+  { id: 't10', name: 'Scuderia Rampante', teamPrincipal: '', primaryColor: '#D84C4C', secondaryColor: '#FFFFFF', lowSpeedCornering: 50, mediumSpeedCornering: 25, highSpeedCornering: 25, topSpeed: 75, acceleration: 75, paceModifier: 0, racecraftModifier: 0, qualifyingModifier: 0 },
 ];
 
 export const INITIAL_DRIVERS: Driver[] = [
-  { id: 'd1', name: 'Max Verstappen', teamId: 't1', number: 1, nationality: 'Dutch', age: 27, pace: 19, qualifying: 19, racecraft: 18, awareness: 16, adaptability: 18 },
-  { id: 'd2', name: 'Sergio Perez', teamId: 't1', number: 11, nationality: 'Mexican', age: 34, pace: 14, qualifying: 13, racecraft: 15, awareness: 13, adaptability: 12 },
-  { id: 'd3', name: 'Lewis Hamilton', teamId: 't2', number: 44, nationality: 'British', age: 39, pace: 18, qualifying: 17, racecraft: 19, awareness: 17, adaptability: 17 },
-  { id: 'd4', name: 'George Russell', teamId: 't2', number: 63, nationality: 'British', age: 26, pace: 16, qualifying: 18, racecraft: 15, awareness: 14, adaptability: 15 },
-  { id: 'd5', name: 'Charles Leclerc', teamId: 't3', number: 16, nationality: 'Monegasque', age: 26, pace: 17, qualifying: 19, racecraft: 16, awareness: 13, adaptability: 14 },
-  { id: 'd6', name: 'Carlos Sainz', teamId: 't3', number: 55, nationality: 'Spanish', age: 29, pace: 16, qualifying: 16, racecraft: 16, awareness: 15, adaptability: 15 },
-  { id: 'd7', name: 'Lando Norris', teamId: 't4', number: 4, nationality: 'British', age: 24, pace: 17, qualifying: 18, racecraft: 16, awareness: 14, adaptability: 16 },
-  { id: 'd8', name: 'Oscar Piastri', teamId: 't4', number: 81, nationality: 'Australian', age: 23, pace: 15, qualifying: 16, racecraft: 14, awareness: 13, adaptability: 14 },
-  { id: 'd9', name: 'Fernando Alonso', teamId: 't5', number: 14, nationality: 'Spanish', age: 42, pace: 16, qualifying: 15, racecraft: 18, awareness: 17, adaptability: 17 },
-  { id: 'd10', name: 'Lance Stroll', teamId: 't5', number: 18, nationality: 'Canadian', age: 25, pace: 12, qualifying: 12, racecraft: 12, awareness: 11, adaptability: 11 },
+  { id: 'd1', name: 'Edward Blake', teamId: 't2', number: 13, nationality: 'American', age: 27, pace: 9, qualifying: 7, racecraft: 13, awareness: 9, adaptability: 11 },
+  { id: 'd2', name: 'John Jeffers', teamId: 't1', number: 63, nationality: 'American', age: 28, pace: 9, qualifying: 11, racecraft: 15, awareness: 10, adaptability: 5 },
+  { id: 'd3', name: 'Chad Chadderton', teamId: 't6', number: 32, nationality: 'British', age: 29, pace: 14, qualifying: 5, racecraft: 7, awareness: 10, adaptability: 8 },
+  { id: 'd4', name: 'Elodie Webber', teamId: 't5', number: 25, nationality: 'British', age: 26, pace: 12, qualifying: 6, racecraft: 11, awareness: 9, adaptability: 10 },
+  { id: 'd5', name: 'Neil Boyd', teamId: 't5', number: 34, nationality: 'British', age: 30, pace: 12, qualifying: 11, racecraft: 8, awareness: 5, adaptability: 6 },
+  { id: 'd6', name: 'Jack Hartley', teamId: 't3', number: 21, nationality: 'Australian', age: 24, pace: 11, qualifying: 13, racecraft: 11, awareness: 9, adaptability: 6 },
+  { id: 'd7', name: 'Sam Solares', teamId: 't6', number: 27, nationality: 'British', age: 27, pace: 13, qualifying: 7, racecraft: 9, awareness: 9, adaptability: 9 },
+  { id: 'd8', name: 'Julian Valero', teamId: 't1', number: 7, nationality: 'American', age: 25, pace: 14, qualifying: 10, racecraft: 10, awareness: 6, adaptability: 6 },
+  { id: 'd9', name: 'Lucas Meers', teamId: 't3', number: 23, nationality: 'Australian', age: 23, pace: 8, qualifying: 7, racecraft: 13, awareness: 12, adaptability: 6 },
+  { id: 'd10', name: 'Claude Pacquin', teamId: 't9', number: 11, nationality: 'French', age: 28, pace: 11, qualifying: 13, racecraft: 9, awareness: 12, adaptability: 6 },
+  { id: 'd11', name: 'Takahiro Sato', teamId: 't8', number: 15, nationality: 'Japanese', age: 26, pace: 13, qualifying: 6, racecraft: 13, awareness: 8, adaptability: 7 },
+  { id: 'd12', name: 'Lucien Moreau', teamId: 't9', number: 16, nationality: 'French', age: 27, pace: 7, qualifying: 12, racecraft: 10, awareness: 12, adaptability: 6 },
+  { id: 'd13', name: 'Annie Kruger', teamId: 't7', number: 17, nationality: 'German', age: 29, pace: 12, qualifying: 10, racecraft: 9, awareness: 5, adaptability: 9 },
+  { id: 'd14', name: 'Matteo Conti', teamId: 't10', number: 18, nationality: 'Italian', age: 25, pace: 8, qualifying: 8, racecraft: 12, awareness: 9, adaptability: 9 },
+  { id: 'd15', name: 'Felipe Andrade', teamId: 't2', number: 19, nationality: 'Canadian', age: 27, pace: 8, qualifying: 14, racecraft: 8, awareness: 7, adaptability: 9 },
+  { id: 'd16', name: 'Samyak Yadav', teamId: 't4', number: 20, nationality: 'Canadian', age: 24, pace: 12, qualifying: 9, racecraft: 11, awareness: 13, adaptability: 9 },
+  { id: 'd17', name: 'Tariq Biviji', teamId: 't4', number: 22, nationality: 'American', age: 30, pace: 7, qualifying: 12, racecraft: 9, awareness: 11, adaptability: 11 },
+  { id: 'd18', name: 'Arnav Yadav', teamId: 't10', number: 10, nationality: 'German', age: 23, pace: 14, qualifying: 8, racecraft: 9, awareness: 12, adaptability: 6 },
 ];
 
 // ============================================
@@ -85,11 +97,6 @@ const DEFAULT_TYRE_DEGRADATION: TyreDegradationConfig = {
   wet: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 14, hiddenMaxLimit: 18, absoluteEndLap: 24 },
 };
 
-// Default tyre status bands derived from the generic degradation model:
-// - fresh:   effective range
-// - base:    from end of effective range up to hidden limit
-// - worn:    from hidden limit+1 up to absoluteEndLap-1
-// - dead:    from absoluteEndLap onwards (forced pit)
 const DEFAULT_TYRE_STATUS_BANDS: Record<keyof TyreDegradationConfig, TyreStatusBands> = {
   soft: {
     freshUntilLap: DEFAULT_TYRE_DEGRADATION.soft.effectiveLapRangeEnd,
@@ -138,11 +145,8 @@ export const TRACKS: Track[] = [
     deterministicTraits: [], conditionalTraits: [],
     weather: 'dry',
     tyreStatusBands: {
-      // Soft: Fresh 1-18, Base 19-20, Worn 21-24, Dead 25+
       soft:  { freshUntilLap: 18, baseUntilLap: 20, wornUntilLap: 24, deadFromLap: 25 },
-      // Medium: Fresh 1-30, Base 31-37, no Worn band (goes straight to Dead at 38)
       medium:{ freshUntilLap: 30, baseUntilLap: 37, wornUntilLap: 37, deadFromLap: 38 },
-      // Hard: Fresh 1-45, Base 46-51, Worn 52-54, Dead 55+
       hard:  { freshUntilLap: 45, baseUntilLap: 51, wornUntilLap: 54, deadFromLap: 55 },
       intermediate: DEFAULT_TYRE_STATUS_BANDS.intermediate,
       wet: DEFAULT_TYRE_STATUS_BANDS.wet,
@@ -183,5 +187,4 @@ export const TRACKS: Track[] = [
   },
 ];
 
-// Lookup helpers (track is static; drivers/teams come from store)
 export const getTrack = (id: string) => TRACKS.find(t => t.id === id);

@@ -52,17 +52,13 @@ function nextId(prefix: string, existing: { id: string }[]): string {
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [teams, setTeams] = useState<Team[]>(() => {
-    const stored = safeParseJSON<Team[]>(typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEYS.teams) : null, []);
-    const base = stored.length > 0 ? stored : INITIAL_TEAMS;
-    return base.map(t => ({
+    return INITIAL_TEAMS.map(t => ({
       ...t,
       traitId: t.traitId ?? t.trait ?? null,
     }));
   });
   const [drivers, setDrivers] = useState<Driver[]>(() => {
-    const stored = safeParseJSON<Driver[]>(typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEYS.drivers) : null, []);
-    const base = stored.length > 0 ? stored : INITIAL_DRIVERS;
-    return base.map(d => ({
+    return INITIAL_DRIVERS.map(d => ({
       ...d,
       traitId: d.traitId ?? d.trait ?? null,
     }));
