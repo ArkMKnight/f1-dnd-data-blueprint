@@ -1125,6 +1125,7 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       return state;
     }
 
+    // Successful overtake without Flexible Strategy: apply position swap.
     const tmp = aState.position;
     aState.position = dState.position;
     dState.position = tmp;
@@ -1136,6 +1137,18 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       primaryDriverId: attacker.id,
       secondaryDriverId: defender.id,
     });
+
+    // Momentum Driver (GM mode): after a successful overtake, grant
+    // +1 Pace modifier on the attacker's *next* contested roll.
+    const attackerMomentumTraitId = attacker.traitId ?? attacker.trait ?? null;
+    if (attackerMomentumTraitId === 'momentum_driver') {
+      const rt = state.traitRuntime.driverTraits[attacker.id];
+      if (rt) {
+        rt.temporaryModifiers = rt.temporaryModifiers || {};
+        rt.temporaryModifiers['pace:nextRoll'] =
+          (rt.temporaryModifiers['pace:nextRoll'] ?? 0) + 1;
+      }
+    }
 
     // Normal awareness check for successful overtake
     const rollDiff = Math.abs(aTotal - dTotal);

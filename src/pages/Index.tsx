@@ -112,13 +112,13 @@ const Index = () => {
 
         <Tabs defaultValue="drivers" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="drivers">Drivers & Cars</TabsTrigger>
+            <TabsTrigger value="drivers">Drivers and Teams</TabsTrigger>
             <TabsTrigger value="auto">Auto Sim</TabsTrigger>
             <TabsTrigger value="gm">GM Mode</TabsTrigger>
             <TabsTrigger value="history">Race History</TabsTrigger>
           </TabsList>
 
-          {/* Drivers & Cars tab */}
+          {/* Drivers and Teams tab */}
           <TabsContent value="drivers" className="space-y-4">
             <Card>
               <CardHeader className="py-3">
@@ -145,7 +145,25 @@ const Index = () => {
                       const carMod = car ? getTrackCompatibilityModifier(car, track) : 0;
                       return (
                         <TableRow key={driver.id}>
-                          <TableCell className="font-medium">{driver.name}</TableCell>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {team?.primaryColor && (
+                                <div className="flex h-5">
+                                  <div
+                                    className="w-[3px]"
+                                    style={{ backgroundColor: team.primaryColor }}
+                                  />
+                                  {team.secondaryColor && (
+                                    <div
+                                      className="w-[3px]"
+                                      style={{ backgroundColor: team.secondaryColor }}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                              <span>{driver.name}</span>
+                            </div>
+                          </TableCell>
                           <TableCell className="text-muted-foreground text-xs">{team?.name}</TableCell>
                           <TableCell className="text-center">
                             <StatCell raw={driver.pace} mod={paceModifierFromStat(driver.pace)} carMod={carMod} affected />
@@ -203,7 +221,25 @@ const Index = () => {
                       const mod = getTrackCompatibilityModifier(car, track);
                       return (
                         <TableRow key={car.id}>
-                          <TableCell className="font-medium">{team?.name}</TableCell>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {team?.primaryColor && (
+                                <div className="flex h-5">
+                                  <div
+                                    className="w-[3px]"
+                                    style={{ backgroundColor: team.primaryColor }}
+                                  />
+                                  {team.secondaryColor && (
+                                    <div
+                                      className="w-[3px]"
+                                      style={{ backgroundColor: team.secondaryColor }}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                              <span>{team?.name}</span>
+                            </div>
+                          </TableCell>
                           <TableCell className="text-center font-mono text-xs">{car.lowSpeedCornering}</TableCell>
                           <TableCell className="text-center font-mono text-xs">{car.mediumSpeedCornering}</TableCell>
                           <TableCell className="text-center font-mono text-xs">{car.highSpeedCornering}</TableCell>
