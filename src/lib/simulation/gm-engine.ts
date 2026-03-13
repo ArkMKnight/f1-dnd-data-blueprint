@@ -11,6 +11,7 @@ import type {
   OvertakeOpportunityRoll,
   OvertakeIntent,
   RaceEvent,
+  AwarenessOutcome,
 } from '@/types/game';
 import {
   OVERTAKE_OPPORTUNITIES_PER_LAP,
@@ -258,6 +259,29 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           };
         });
       }
+
+      // Monaco Double Stack: if both drivers of a team pit on the same lap,
+      // the car that was behind on track takes an additional pit position loss.
+      const monacoDoubleStackDrivers = new Set<string>();
+      if (race.track.name === 'Monaco' && race.currentLap < race.totalLaps) {
+        const byTeam: Record<string, { driverId: string; position: number }[]> = {};
+        race.standings.forEach(s => {
+          if (s.isDNF) return;
+          const pending = s.tyreState.pendingPit;
+          if (!pending.active || !pending.compound) return;
+          const driver = race.drivers.find(d => d.id === s.driverId);
+          if (!driver) return;
+          const teamId = driver.teamId;
+          if (!byTeam[teamId]) byTeam[teamId] = [];
+          byTeam[teamId].push({ driverId: s.driverId, position: s.position });
+        });
+        Object.values(byTeam).forEach(list => {
+          if (list.length < 2) return;
+          list.sort((a, b) => a.position - b.position);
+          const behind = list[list.length - 1];
+          monacoDoubleStackDrivers.add(behind.driverId);
+        });
+      }
       // 1. Auto-handle forced pits (legacy forced conditions)
       race.standings.forEach(s => {
         if (s.isDNF) return;
@@ -294,6 +318,15 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           s.pitCount++;
           s.hasPitted = true;
           applyPositionLoss(race, s.driverId, pitRes.positionsLost);
+          // Apply Monaco double-stack penalty to the trailing car in a team double stop.
+          if (race.track.name === 'Monaco' && monacoDoubleStackDrivers.has(s.driverId) && race.track.pitLossDoubleStack > 0) {
+            applyPositionLoss(race, s.driverId, race.track.pitLossDoubleStack);
+            race.eventLog.push({
+              lap: race.currentLap,
+              type: 'pit_stop',
+              description: `${driver.name}: Double Stack penalty (additional ${race.track.pitLossDoubleStack} positions lost at Monaco)`,
+            });
+          }
           race.eventLog.push({
             lap: race.currentLap,
             type: 'pit_stop',
@@ -506,7 +539,44 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
     case 'awareness_roll': {
       const rollValue = typeof input === 'number' ? input : parseInt(input as string);
       if (isNaN(rollValue)) return state;
-      return resolveAwareness(state, rollValue);
+      const ctx = state.pendingPrompt?.context as Record<string, unknown> | undefined;
+      const waitingFor = (ctx?.waitingFor as 'attacker' | 'defender' | undefined) ?? 'attacker';
+
+      if (waitingFor === 'attacker') {
+        // Store attacker roll, now request defender roll.
+        const attackerId = ctx?.attackerId as string;
+        const defenderId = ctx?.defenderId as string;
+        const attacker = race.drivers.find(d => d.id === attackerId);
+        const defender = race.drivers.find(d => d.id === defenderId);
+
+        state.pendingPrompt = {
+          phase: 'awareness_roll',
+          description: defender
+            ? `Awareness check: now roll d6 for ${defender.name} (defender).`
+            : 'Awareness check: now roll d6 for defender.',
+          needsInput: true,
+          inputType: 'roll',
+          diceSize: 6,
+          context: {
+            ...(ctx ?? {}),
+            waitingFor: 'defender',
+            attackerRoll: rollValue,
+          },
+        };
+        return state;
+      }
+
+      // We have both rolls; resolve full awareness outcomes.
+      const attackerRoll = (ctx?.attackerRoll as number) ?? rollValue;
+      const defenderRoll = rollValue;
+      // Preserve context (including any RS flags) for resolver.
+      state.pendingPrompt = {
+        phase: 'awareness_roll',
+        description: state.pendingPrompt?.description ?? 'Awareness resolution',
+        needsInput: false,
+        context: { ...(ctx ?? {}), attackerRoll, defenderRoll },
+      };
+      return resolveAwareness(state, attackerRoll, defenderRoll);
     }
 
     case 'trait_choice': {
@@ -575,7 +645,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           state.currentPhase = 'awareness_roll';
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: `Awareness check (roll diff ${rollDiff}). Roll d6:`,
+            description: `Awareness check (roll diff ${rollDiff}). Roll d6 for ${attacker.name} (attacker):`,
             needsInput: true,
             inputType: 'roll',
             diceSize: 6,
@@ -583,6 +653,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
               attackerId,
               defenderId,
               awarenessDiff: difference,
+              waitingFor: 'attacker',
             },
           };
           return state;
@@ -592,71 +663,61 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
       }
 
       if (choiceType === 'reactive_suspension') {
+        const originalDefenderRoll = tctx?.defenderRoll as number;
+        const originalDefenderOutcome = tctx?.defenderOutcome as AwarenessOutcome;
+        const attackerRoll = tctx?.attackerRoll as number;
+        const attackerId = tctx?.attackerId as string;
+        const defenderId = tctx?.defenderId as string;
+        const defenderTeamId = tctx?.defenderTeamId as string;
+        const defenderName = tctx?.defenderName as string;
+
         if (choice === 'reactive_suspension_yes') {
-          const defenderTeamId = tctx?.defenderTeamId as string;
           consumeTraitActivation(state.traitRuntime, 'reactive_suspension', 'team', defenderTeamId);
           race.eventLog.push({
             lap: race.currentLap,
             type: 'trait',
-            description: `Reactive Suspension used — rerolling Awareness d6.`,
+            description: `Reactive Suspension used — original roll ${originalDefenderRoll} → ${originalDefenderOutcome}. Rerolling defender Awareness d6.`,
           });
           state.currentPhase = 'awareness_roll';
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: 'Reactive Suspension reroll — Roll d6:',
+            description: `Reactive Suspension reroll for ${defenderName}: original d6=${originalDefenderRoll} → ${originalDefenderOutcome}. Roll new d6 for defender:`,
             needsInput: true,
             inputType: 'roll',
             diceSize: 6,
             context: {
-              attackerId: tctx?.attackerId,
-              defenderId: tctx?.defenderId,
+              attackerId,
+              defenderId,
+              defenderTeamId,
               awarenessDiff: tctx?.awarenessDiff,
+              waitingFor: 'defender',
+              attackerRoll,
+              rsConsumed: true,
             },
           };
           return state;
         }
+
         if (choice === 'reactive_suspension_no') {
-          const finalOutcome = tctx?.finalOutcome as string;
-          const defenderId = tctx?.defenderId as string;
-          const attackerId = tctx?.attackerId as string;
-          const defenderName = tctx?.defenderName as string;
-          const defender = race.drivers.find(d => d.id === defenderId)!;
-          const attacker = race.drivers.find(d => d.id === attackerId)!;
-          appendLiveRaceEvent(race, {
-            lapNumber: race.currentLap,
-            type: 'incident',
-            description: `${defenderName} awareness incident (${finalOutcome})`,
-            primaryDriverId: defenderId,
-            secondaryDriverId: attackerId,
-          });
-          if (requiresDamageHandoff(finalOutcome as any)) {
-            const damageType = mapAwarenessOutcomeToDamageState(finalOutcome as any);
-            const dState = race.standings.find(s => s.driverId === defenderId)!;
-            const aState = race.standings.find(s => s.driverId === attackerId)!;
-            dState.damageState = { ...dState.damageState, state: escalateDamage(dState.damageState.state as any, damageType) };
-            aState.damageState = { ...aState.damageState, state: escalateDamage(aState.damageState.state as any, damageType) };
-            if (damageType === 'dnf') {
-              dState.isDNF = true;
-              aState.isDNF = true;
-            }
-            race.eventLog.push({
-              lap: race.currentLap, type: 'damage',
-              description: `Both: damage → ${dState.damageState.state} (${defender.name}, ${attacker.name})`,
-            });
-          }
-          if (finalOutcome === 'momentumLoss') {
-            const dState = race.standings.find(s => s.driverId === defenderId)!;
-            const aState = race.standings.find(s => s.driverId === attackerId)!;
-            const maxPos = race.standings.filter(s => !s.isDNF).length;
-            dState.position = Math.min(dState.position + race.track.momentumLossPositions, maxPos);
-            aState.position = Math.min(aState.position + race.track.momentumLossPositions, maxPos);
-            race.eventLog.push({
-              lap: race.currentLap, type: 'momentum_loss',
-              description: `Both lose ${race.track.momentumLossPositions} pos: ${defender.name}, ${attacker.name}`,
-            });
-          }
+          // Proceed with original rolls and outcomes; mark RS as consumed to avoid re-offer.
+          state.currentPhase = 'awareness_roll';
+          state.pendingPrompt = {
+            phase: 'awareness_roll',
+            description: `Reactive Suspension declined for ${defenderName}. Applying original Awareness outcomes.`,
+            needsInput: false,
+            context: {
+              attackerId,
+              defenderId,
+              awarenessDiff: tctx?.awarenessDiff,
+              attackerRoll,
+              defenderRoll: originalDefenderRoll,
+              rsConsumed: true,
+            },
+          };
+          return resolveAwareness(state, attackerRoll, originalDefenderRoll);
         }
-        return moveToNextOpportunityOrEnd(state);
+
+        return state;
       }
 
       return state;
@@ -1096,11 +1157,16 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
           state.currentPhase = 'awareness_roll';
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: `Awareness check triggered (roll diff ${rollDiff}, awareness diff ${difference}). Roll d6:`,
+            description: `Awareness check triggered (roll diff ${rollDiff}, awareness diff ${difference}). Roll d6 for ${attacker.name} (attacker):`,
             needsInput: true,
             inputType: 'roll',
             diceSize: 6,
-            context: { attackerId: attacker.id, defenderId: defender.id, awarenessDiff: difference },
+            context: {
+              attackerId: attacker.id,
+              defenderId: defender.id,
+              awarenessDiff: difference,
+              waitingFor: 'attacker',
+            },
           };
           return state;
         }
@@ -1472,11 +1538,16 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
     state.currentPhase = 'awareness_roll';
     state.pendingPrompt = {
       phase: 'awareness_roll',
-      description: `Awareness (Relentless retry, roll diff ${rollDiff}). Roll d6:`,
+      description: `Awareness (Relentless retry, roll diff ${rollDiff}). Roll d6 for ${attacker.name} (attacker):`,
       needsInput: true,
       inputType: 'roll',
       diceSize: 6,
-      context: { attackerId: attacker.id, defenderId: defender.id, awarenessDiff: difference },
+      context: {
+        attackerId: attacker.id,
+        defenderId: defender.id,
+        awarenessDiff: difference,
+        waitingFor: 'attacker',
+      },
     };
     return state;
   }
@@ -1489,7 +1560,7 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
   return moveToNextOpportunityOrEnd(state);
 };
 
-const resolveAwareness = (state: GMState, d6Roll: number): GMState => {
+const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: number): GMState => {
   const race = state.raceState;
   const ctx = state.pendingPrompt?.context as Record<string, unknown> | undefined;
   const attackerId = ctx?.attackerId as string;
@@ -1501,98 +1572,163 @@ const resolveAwareness = (state: GMState, d6Roll: number): GMState => {
   const effectiveDiff = awarenessDiff + defenderMod + persistentAwarenessMod;
   const attacker = race.drivers.find(d => d.id === attackerId)!;
   const defender = race.drivers.find(d => d.id === defenderId)!;
-
-  const rawOutcome = resolveAwarenessD6Outcome(effectiveDiff, d6Roll);
-  const { hasEvasion } = checkEvasionPriority(attacker.awareness, defender.awareness);
-  const evasionAdjusted = applyEvasionDowngrade(rawOutcome, hasEvasion);
-
   const attackerTeam = state.teams.find(t => t.id === attacker.teamId)!;
   const defenderTeam = state.teams.find(t => t.id === defender.teamId)!;
 
-  const traitAdjusted = applyAwarenessOutcomeTraits({
+  // Base outcomes from each driver's own d6
+  let attackerOutcome = resolveAwarenessD6Outcome(effectiveDiff, attackerRoll);
+  let defenderOutcome = resolveAwarenessD6Outcome(effectiveDiff, defenderRoll);
+
+  // Evasion priority applies only to the higher-awareness driver.
+  const { hasEvasion, evasionDriverId } = checkEvasionPriority(attacker.awareness, defender.awareness);
+  if (hasEvasion) {
+    if (evasionDriverId === 'attacker') {
+      attackerOutcome = applyEvasionDowngrade(attackerOutcome, true);
+    } else if (evasionDriverId === 'defender') {
+      defenderOutcome = applyEvasionDowngrade(defenderOutcome, true);
+    }
+  }
+
+  // Apply awareness outcome–modifying traits independently per driver
+  const attackerTraitAdjusted = applyAwarenessOutcomeTraits({
+    track: race.track,
+    attacker: defender,          // other driver
+    defender: attacker,          // the driver whose traits we care about
+    attackerTeam: defenderTeam,
+    defenderTeam: attackerTeam,
+    awarenessDifference: effectiveDiff,
+    baseOutcome: attackerOutcome,
+  });
+  attackerOutcome = attackerTraitAdjusted.outcome;
+
+  const defenderTraitAdjusted = applyAwarenessOutcomeTraits({
     track: race.track,
     attacker,
     defender,
     attackerTeam,
     defenderTeam,
     awarenessDifference: effectiveDiff,
-    baseOutcome: evasionAdjusted,
+    baseOutcome: defenderOutcome,
   });
-  const finalOutcome = traitAdjusted.outcome;
+  defenderOutcome = defenderTraitAdjusted.outcome;
 
   race.eventLog.push({
-    lap: race.currentLap, type: 'awareness',
-    description: `Awareness d6(${d6Roll}) → ${finalOutcome}${hasEvasion ? ' (evasion)' : ''}`,
+    lap: race.currentLap,
+    type: 'awareness',
+    description: `Awareness: attacker d6(${attackerRoll}) → ${attackerOutcome}, defender d6(${defenderRoll}) → ${defenderOutcome}${hasEvasion ? ' (evasion applied to higher Awareness driver)' : ''}`,
   });
 
-  if (finalOutcome !== 'cleanRacing') {
-    const rsState = state.traitRuntime.teamTraits[defenderTeam.id];
-    const canReactiveSuspension =
-      (defenderTeam.traitId ?? defenderTeam.trait) === 'reactive_suspension' &&
-      (rsState?.usesRemaining ?? 0) > 0;
+  const aState = race.standings.find(s => s.driverId === attackerId)!;
+  const dState = race.standings.find(s => s.driverId === defenderId)!;
 
-    if (canReactiveSuspension) {
-      state.currentPhase = 'trait_choice';
-      state.pendingPrompt = {
-        phase: 'trait_choice',
-        description: `${defender.name}'s team: Use Reactive Suspension to reroll this Awareness? (Once per race)`,
-        needsInput: true,
-        inputType: 'choice',
-        choices: [
-          { label: 'Yes — reroll d6', value: 'reactive_suspension_yes' },
-          { label: 'No — keep result', value: 'reactive_suspension_no' },
-        ],
-        context: {
-          type: 'reactive_suspension',
-          attackerId,
-          defenderId,
-          defenderTeamId: defenderTeam.id,
-          awarenessDiff: effectiveDiff,
-          finalOutcome,
-          d6Roll,
-          defenderName: defender.name,
-        },
-      };
-      return state;
+  // 1) Damage escalations (self-only)
+  const applyDamage = (driverState: typeof aState, outcome: AwarenessOutcome) => {
+    if (!requiresDamageHandoff(outcome)) return;
+    const damageType = mapAwarenessOutcomeToDamageState(outcome);
+    const prev = driverState.damageState.state;
+    driverState.damageState = {
+      ...driverState.damageState,
+      state: escalateDamage(driverState.damageState.state as any, damageType),
+    };
+    if (damageType === 'dnf') {
+      driverState.isDNF = true;
     }
-
-    appendLiveRaceEvent(race, {
-      lapNumber: race.currentLap,
-      type: 'incident',
-      description: `${defender.name} awareness incident (${finalOutcome})`,
-      primaryDriverId: defender.id,
-      secondaryDriverId: attacker.id,
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'damage',
+      description: `${race.drivers.find(d => d.id === driverState.driverId)?.name ?? driverState.driverId}: ${prev} → ${driverState.damageState.state}`,
     });
+  };
+
+  applyDamage(aState, attackerOutcome);
+  applyDamage(dState, defenderOutcome);
+
+  // 2) Momentum Loss (self-only)
+  const applyMomentum = (driverState: typeof aState, outcome: AwarenessOutcome) => {
+    if (outcome !== 'momentumLoss') return;
+    const loss = race.track.momentumLossPositions;
+    if (loss <= 0) return;
+    applyPositionLoss(race, driverState.driverId, loss);
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'momentum_loss',
+      description: `${race.drivers.find(d => d.id === driverState.driverId)?.name ?? driverState.driverId} loses ${loss} position(s) from Momentum Loss.`,
+    });
+  };
+
+  applyMomentum(aState, attackerOutcome);
+  applyMomentum(dState, defenderOutcome);
+
+  // 3) Position Swaps / Shifts
+  const aPosShift = attackerOutcome === 'positionShift';
+  const dPosShift = defenderOutcome === 'positionShift';
+  const aHasMomentum = attackerOutcome === 'momentumLoss';
+  const dHasMomentum = defenderOutcome === 'momentumLoss';
+  const aHasDamage = requiresDamageHandoff(attackerOutcome);
+  const dHasDamage = requiresDamageHandoff(defenderOutcome);
+
+  const swapPositions = (first: typeof aState, second: typeof aState) => {
+    const tmp = first.position;
+    first.position = second.position;
+    second.position = tmp;
+  };
+
+  if (aPosShift && dPosShift) {
+    // Both got position shift → higher Awareness driver ends ahead.
+    const attackerAw = attacker.awareness;
+    const defenderAw = defender.awareness;
+    const higher = attackerAw > defenderAw ? aState : dState;
+    const lower = higher === aState ? dState : aState;
+    swapPositions(higher, lower);
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'awareness',
+      description: `Both drivers rolled Position Swap — higher Awareness driver (${race.drivers.find(d => d.id === higher.driverId)?.name ?? higher.driverId}) ends ahead.`,
+    });
+  } else {
+    // Mixed or single Position Shift cases.
+    if (aPosShift && !dPosShift) {
+      if (dHasMomentum) {
+        // Other has Momentum Loss → that driver already dropped; Position Swap driver drops one position.
+        applyPositionLoss(race, attackerId, 1);
+        race.eventLog.push({
+          lap: race.currentLap,
+          type: 'awareness',
+          description: `${attacker.name} rolled Position Swap while ${defender.name} had Momentum Loss — ${attacker.name} drops one extra position.`,
+        });
+      } else if (dHasDamage) {
+        // Other has damage → damage applied, no swap.
+        race.eventLog.push({
+          lap: race.currentLap,
+          type: 'awareness',
+          description: `${attacker.name} rolled Position Swap but ${defender.name} took damage — no position swap applied.`,
+        });
+      } else {
+        // Clean or non-positional outcome for the other driver → full swap.
+        swapPositions(aState, dState);
+      }
+    } else if (dPosShift && !aPosShift) {
+      if (aHasMomentum) {
+        applyPositionLoss(race, defenderId, 1);
+        race.eventLog.push({
+          lap: race.currentLap,
+          type: 'awareness',
+          description: `${defender.name} rolled Position Swap while ${attacker.name} had Momentum Loss — ${defender.name} drops one extra position.`,
+        });
+      } else if (aHasDamage) {
+        race.eventLog.push({
+          lap: race.currentLap,
+          type: 'awareness',
+          description: `${defender.name} rolled Position Swap but ${attacker.name} took damage — no position swap applied.`,
+        });
+      } else {
+        swapPositions(aState, dState);
+      }
+    }
   }
 
-  if (finalOutcome !== 'cleanRacing') {
-    if (requiresDamageHandoff(finalOutcome)) {
-      const damageType = mapAwarenessOutcomeToDamageState(finalOutcome);
-      const dState = race.standings.find(s => s.driverId === defenderId)!;
-      const aState = race.standings.find(s => s.driverId === attackerId)!;
-      dState.damageState = { ...dState.damageState, state: escalateDamage(dState.damageState.state as any, damageType) };
-      aState.damageState = { ...aState.damageState, state: escalateDamage(aState.damageState.state as any, damageType) };
-      if (damageType === 'dnf') {
-        dState.isDNF = true;
-        aState.isDNF = true;
-      }
-      race.eventLog.push({
-        lap: race.currentLap, type: 'damage',
-        description: `Both: damage → ${dState.damageState.state} (${defender.name}, ${attacker.name})`,
-      });
-    }
-    if (finalOutcome === 'momentumLoss') {
-      const dState = race.standings.find(s => s.driverId === defenderId)!;
-      const aState = race.standings.find(s => s.driverId === attackerId)!;
-      const maxPos = race.standings.filter(s => !s.isDNF).length;
-      dState.position = Math.min(dState.position + race.track.momentumLossPositions, maxPos);
-      aState.position = Math.min(aState.position + race.track.momentumLossPositions, maxPos);
-      race.eventLog.push({
-        lap: race.currentLap, type: 'momentum_loss',
-        description: `Both lose ${race.track.momentumLossPositions} pos: ${defender.name}, ${attacker.name}`,
-      });
-    }
-  }
+  // 4) Safety Car / Red Flag triggers are currently handled in the auto-sim;
+  // GM mode leaves flag control to the GM, so we do not alter raceFlag here.
 
   return moveToNextOpportunityOrEnd(state);
 };

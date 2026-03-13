@@ -138,9 +138,9 @@ export const TRACKS: Track[] = [
   {
     id: 'tr1', name: 'Monaco', lapCount: 10,
     primaryCarStat: 'lowSpeedCornering', secondaryCarStat: 'acceleration',
-    momentumLossPositions: 2,
-    pitLoss: 4,
-    pitLossNormal: 4, pitLossSafetyCar: 2, pitLossFrontWing: 1, pitLossDoubleStack: 1,
+    momentumLossPositions: 5,
+    pitLoss: 8,
+    pitLossNormal: 8, pitLossSafetyCar: 4, pitLossFrontWing: 1, pitLossDoubleStack: 6,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
     weather: 'dry',
