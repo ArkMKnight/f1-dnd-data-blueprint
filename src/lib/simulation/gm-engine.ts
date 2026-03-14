@@ -29,6 +29,7 @@ import {
   checkForcedPitCondition,
   MAJOR_DAMAGE_ROLL_MODIFIER,
   resolveIntentDeclaration,
+  determineRaceFlag,
 } from '@/types/game';
 import {
   statToModifier,
@@ -62,7 +63,8 @@ export type GMPhase =
   | 'tyre_check'
   | 'lap_end'
   | 'race_complete'
-  | 'experimental_parts_roll';
+  | 'experimental_parts_roll'
+  | 'safety_car_action';
 
 export interface GMPrompt {
   phase: GMPhase;
@@ -186,10 +188,12 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           return state;
         }
       }
-      // Increment tyres
-      race.standings.forEach(s => {
-        if (!s.isDNF) s.tyreState = { ...s.tyreState, currentLap: s.tyreState.currentLap + 1 };
-      });
+      // Increment tyres (paused under Safety Car)
+      if (race.raceFlag !== 'safetyCar') {
+        race.standings.forEach(s => {
+          if (!s.isDNF) s.tyreState = { ...s.tyreState, currentLap: s.tyreState.currentLap + 1 };
+        });
+      }
       race.eventLog.push({ lap: currentLapNum, type: 'lap_start', description: `Lap ${currentLapNum} begins` });
       state.currentPhase = 'pit_decision';
       state.currentOpportunityIndex = 0;
@@ -249,9 +253,11 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
       }
       state.pendingPrompt = null;
       state.currentPhase = 'pit_decision';
-      race.standings.forEach(sx => {
-        if (!sx.isDNF) sx.tyreState = { ...sx.tyreState, currentLap: sx.tyreState.currentLap + 1 };
-      });
+      if (race.raceFlag !== 'safetyCar') {
+        race.standings.forEach(sx => {
+          if (!sx.isDNF) sx.tyreState = { ...sx.tyreState, currentLap: sx.tyreState.currentLap + 1 };
+        });
+      }
       race.eventLog.push({ lap: currentLapNum, type: 'lap_start', description: `Lap ${currentLapNum} begins` });
       state.currentOpportunityIndex = 0;
       return advanceGMState(state);
@@ -297,6 +303,13 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           monacoDoubleStackDrivers.add(behind.driverId);
         });
       }
+      // Pit position loss: Red Flag = 0 (free); Safety Car = track.pitLossSafetyCar; else track.pitLossNormal
+      const getPitPositionLossForFlag = (): number => {
+        if (race.raceFlag === 'redFlag') return 0;
+        if (race.raceFlag === 'safetyCar') return race.track.pitLossSafetyCar;
+        return race.track.pitLossNormal ?? race.track.pitLoss;
+      };
+
       // 1. Auto-handle forced pits (legacy forced conditions)
       race.standings.forEach(s => {
         if (s.isDNF) return;
@@ -306,7 +319,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           const pitRes = executePitStop(s.tyreState, driver, race.track, 'forced', null);
           s.tyreState = pitRes.updated;
           s.pitCount++;
-          applyPositionLoss(race, s.driverId, pitRes.positionsLost);
+          applyPositionLoss(race, s.driverId, getPitPositionLossForFlag());
           race.eventLog.push({
             lap: race.currentLap,
             type: 'pit_stop',
@@ -332,16 +345,17 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           s.tyreState = pitRes.updated;
           s.pitCount++;
           s.hasPitted = true;
-          applyPositionLoss(race, s.driverId, pitRes.positionsLost);
+          let positionsLost = getPitPositionLossForFlag();
           // Apply Monaco double-stack penalty to the trailing car in a team double stop.
           if (race.track.name === 'Monaco' && monacoDoubleStackDrivers.has(s.driverId) && race.track.pitLossDoubleStack > 0) {
-            applyPositionLoss(race, s.driverId, race.track.pitLossDoubleStack);
+            positionsLost += race.track.pitLossDoubleStack;
             race.eventLog.push({
               lap: race.currentLap,
               type: 'pit_stop',
               description: `${driver.name}: Double Stack penalty (additional ${race.track.pitLossDoubleStack} positions lost at Monaco)`,
             });
           }
+          applyPositionLoss(race, s.driverId, positionsLost);
           race.eventLog.push({
             lap: race.currentLap,
             type: 'pit_stop',
@@ -356,8 +370,53 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
         });
       }
 
+      // After pit window: if we were under Red Flag, resume Green for the rest of the race
+      if (race.raceFlag === 'redFlag') {
+        race.raceFlag = 'green';
+        race.eventLog.push({
+          lap: race.currentLap,
+          type: 'flag',
+          description: 'Race restarts under Green Flag after Red Flag free pit window.',
+        });
+      }
+
+      // Under Safety Car: no overtakes; show two actions only
+      if (race.raceFlag === 'safetyCar') {
+        state.currentPhase = 'safety_car_action';
+        state.pendingPrompt = {
+          phase: 'safety_car_action',
+          description: 'Safety Car: no overtaking this lap. Advance to next lap or resume under green flag.',
+          needsInput: true,
+          inputType: 'choice',
+          choices: [
+            { label: 'Advance to Next Lap', value: 'advance_lap' },
+            { label: 'Resume under Green Flag', value: 'resume_green' },
+          ],
+        };
+        return state;
+      }
+
       state.currentPhase = 'opportunity_roll';
       state.currentOpportunityIndex = 1;
+      return generateOpportunityPrompt(state);
+    }
+
+    case 'safety_car_action': {
+      if (input !== 'advance_lap' && input !== 'resume_green') return state;
+      if (input === 'advance_lap') {
+        state.currentPhase = 'lap_end';
+        state.pendingPrompt = null;
+        return advanceGMState(state);
+      }
+      // resume_green
+      race.raceFlag = 'green';
+      race.eventLog.push({
+        lap: race.currentLap,
+        type: 'flag',
+        description: 'Resumed under Green Flag.',
+      });
+      state.currentPhase = 'opportunity_roll';
+      state.pendingPrompt = null;
       return generateOpportunityPrompt(state);
     }
 
@@ -791,6 +850,13 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
     }
 
     case 'lap_end': {
+      // Cap at total laps (e.g. when advancing from Safety Car / Red Flag skip)
+      if (race.currentLap >= race.totalLaps) {
+        state.currentPhase = 'race_complete';
+        race.isComplete = true;
+        state.pendingPrompt = { phase: 'race_complete', description: 'Race complete!', needsInput: false };
+        return state;
+      }
       state.currentPhase = 'lap_start';
       return advanceGMState(state);
     }
@@ -825,10 +891,31 @@ const generateOpportunityPrompt = (state: GMState): GMState => {
 };
 
 const moveToNextOpportunityOrEnd = (state: GMState): GMState => {
-  const opportunitiesThisLap = getOvertakeOpportunitiesPerLapForTrack(state.raceState.track);
+  const race = state.raceState;
+  const opportunitiesThisLap = getOvertakeOpportunitiesPerLapForTrack(race.track);
+
   if (state.currentOpportunityIndex < opportunitiesThisLap) {
     state.currentOpportunityIndex++;
     state.currentOpportunity = null;
+    // No overtaking under Safety Car or Red Flag
+    if (race.raceFlag === 'safetyCar') {
+      state.currentPhase = 'safety_car_action';
+      state.pendingPrompt = {
+        phase: 'safety_car_action',
+        description: 'Safety Car: no overtaking. Advance to next lap or resume under green flag.',
+        needsInput: true,
+        inputType: 'choice',
+        choices: [
+          { label: 'Advance to Next Lap', value: 'advance_lap' },
+          { label: 'Resume under Green Flag', value: 'resume_green' },
+        ],
+      };
+      return state;
+    }
+    if (race.raceFlag === 'redFlag') {
+      state.currentPhase = 'tyre_check';
+      return advanceGMState(state);
+    }
     state.currentPhase = 'opportunity_roll';
     return generateOpportunityPrompt(state);
   }
@@ -1714,6 +1801,26 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   applyDamage(aState, attackerOutcome);
   applyDamage(dState, defenderOutcome);
 
+  // Safety Car / Red Flag from collision damage
+  const attackerDamage = aState.damageState.state;
+  const defenderDamage = dState.damageState.state;
+  const flag = determineRaceFlag(attackerDamage, defenderDamage);
+  if (flag === 'safetyCar') {
+    race.raceFlag = 'safetyCar';
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'flag',
+      description: `Safety Car deployed after collision (both drivers Major Damage).`,
+    });
+  } else if (flag === 'redFlag') {
+    race.raceFlag = 'redFlag';
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'flag',
+      description: `Red Flag: both drivers DNF from collision. Positions preserved; free pit stop available next lap.`,
+    });
+  }
+
   // 2) Momentum Loss (self-only)
   const applyMomentum = (driverState: typeof aState, outcome: AwarenessOutcome) => {
     if (outcome !== 'momentumLoss') return;
@@ -1807,9 +1914,6 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
       }
     }
   }
-
-  // 4) Safety Car / Red Flag triggers are currently handled in the auto-sim;
-  // GM mode leaves flag control to the GM, so we do not alter raceFlag here.
 
   return moveToNextOpportunityOrEnd(state);
 };

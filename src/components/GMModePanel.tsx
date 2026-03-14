@@ -405,6 +405,14 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     setGmState({ ...gmState, raceState: newRaceState });
   }, [gmState]);
 
+  const handleSetRaceFlag = useCallback((flag: 'green' | 'safetyCar' | 'redFlag') => {
+    if (!gmState) return;
+    setGmState({
+      ...gmState,
+      raceState: { ...gmState.raceState, raceFlag: flag },
+    });
+  }, [gmState]);
+
   // Commentary: derive a single line for the last resolved contest.
   useEffect(() => {
     if (!gmState) return;
@@ -811,9 +819,29 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       {/* Status bar */}
       <div className="flex items-center gap-3 flex-wrap">
         <Badge variant="outline">Lap {race.currentLap}/{race.totalLaps}</Badge>
-        <Badge variant={race.raceFlag === 'green' ? 'default' : 'destructive'}>
-          {race.raceFlag === 'green' ? '🟢 Green' : race.raceFlag === 'safetyCar' ? '🟡 Safety Car' : '🔴 Red Flag'}
-        </Badge>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <Badge
+              variant={race.raceFlag === 'green' ? 'default' : 'destructive'}
+              className="cursor-context-menu"
+            >
+              {race.raceFlag === 'green' ? '🟢 Green' : race.raceFlag === 'safetyCar' ? '🟡 Safety Car' : '🔴 Red Flag'}
+            </Badge>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuLabel>Set race flag</ContextMenuLabel>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => handleSetRaceFlag('green')}>
+              🟢 Green Flag
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => handleSetRaceFlag('safetyCar')}>
+              🟡 Safety Car
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => handleSetRaceFlag('redFlag')}>
+              🔴 Red Flag
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <Badge variant="secondary">{gmState.currentPhase}</Badge>
         {race.isComplete && <Badge className="bg-green-600 text-white">RACE COMPLETE</Badge>}
       </div>
