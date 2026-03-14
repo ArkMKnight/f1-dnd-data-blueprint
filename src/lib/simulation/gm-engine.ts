@@ -681,14 +681,16 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
         } else if (choice === 'flexible_strategy_yes') {
           consumeTraitActivation(state.traitRuntime, 'flexible_strategy', 'team', defender.teamId);
           const dTr = state.traitRuntime.driverTraits[defenderId];
-          if (dTr) {
+          if (dTr && dState.position <= 10) {
             dTr.temporaryModifiers = dTr.temporaryModifiers || {};
-            dTr.temporaryModifiers['awareness:flexible_strategy'] = -1; // rest of race
+            dTr.temporaryModifiers['awareness:flexible_strategy'] = -1;
           }
           race.eventLog.push({
             lap: race.currentLap,
             type: 'trait',
-            description: `${defender.name}'s team used Flexible Strategy — position unchanged; -1 Awareness for rest of race.`,
+            description: dState.position <= 10
+              ? `${defender.name}'s team used Flexible Strategy — position unchanged; -1 Awareness for rest of race.`
+              : `${defender.name}'s team used Flexible Strategy — position unchanged; no Awareness penalty (outside top 10).`,
           });
         }
 

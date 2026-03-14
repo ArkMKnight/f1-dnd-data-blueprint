@@ -658,14 +658,16 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
       if (useFlexibleStrategy) {
         flexibleStrategyState!.usesRemaining = Math.max(0, (flexibleStrategyState!.usesRemaining ?? 1) - 1);
         const dTr = traitRuntime!.driverTraits[defenderId];
-        if (dTr) {
+        if (dTr && defenderState.position <= 10) {
           dTr.temporaryModifiers = dTr.temporaryModifiers || {};
           dTr.temporaryModifiers['awareness:flexible_strategy'] = -1;
         }
         newState.eventLog.push({
           lap,
           type: 'trait',
-          description: `${defender.name}'s team used Flexible Strategy — position unchanged; -1 Awareness rest of race.`,
+          description: defenderState.position <= 10
+            ? `${defender.name}'s team used Flexible Strategy — position unchanged; -1 Awareness rest of race.`
+            : `${defender.name}'s team used Flexible Strategy — position unchanged; no Awareness penalty (outside top 10).`,
         });
       } else {
         const aPos = attackerState.position;
@@ -704,7 +706,8 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         );
         let effectiveDiff = difference;
         if (traitRuntime) {
-          const mod = traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
+          const mod =
+            traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
           effectiveDiff = difference + mod;
         }
         const category = determineAwarenessOutcomeCategory(effectiveDiff);
@@ -1068,8 +1071,9 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         );
         let retryEffectiveDiff = retryDiff;
         if (traitRuntime) {
-          const rmod = traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
-          retryEffectiveDiff = retryDiff + rmod;
+          const mod =
+            traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
+          retryEffectiveDiff = retryDiff + mod;
         }
         const retryCategory = determineAwarenessOutcomeCategory(retryEffectiveDiff);
         const retryDefenderHasPreservation = (defender.traitId ?? defender.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
@@ -1218,8 +1222,9 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           );
           let failEffectiveDiff = failDiff;
           if (traitRuntime) {
-            const fmod = traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
-            failEffectiveDiff = failDiff + fmod;
+            const mod =
+              traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
+            failEffectiveDiff = failDiff + mod;
           }
           const failCategory = determineAwarenessOutcomeCategory(failEffectiveDiff);
           const failDefenderHasPreservation = (defender.traitId ?? defender.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
