@@ -30,7 +30,11 @@ import {
   MAJOR_DAMAGE_ROLL_MODIFIER,
   resolveIntentDeclaration,
 } from '@/types/game';
-import { statToModifier, getModifiedDriverStat, getMonacoRacecraftBonus } from './track-compatibility';
+import {
+  statToModifier,
+  getModifiedDriverStat,
+  getMonacoRacecraftBonus,
+} from './track-compatibility';
 import type { DriverRaceState, RaceState } from './race-engine';
 import { initializeRace, appendLiveRaceEvent } from './race-engine';
 import { executePitStop, getTyreStatus, getTyrePhase1Modifiers, getPuncturePhase3Penalty } from './tyre-system';
@@ -69,6 +73,17 @@ export interface GMPrompt {
   choices?: { label: string; value: string }[];
   context?: Record<string, unknown>;
 }
+
+// Risk tiers for Awareness outcomes — lower is safer.
+const AWARENESS_RISK_TIER: Record<AwarenessOutcome, number> = {
+  cleanRacing: 0,
+  miracleEscape: 0,
+  positionShift: 1,
+  momentumLoss: 2,
+  minorDamage: 3,
+  majorDamage: 4,
+  dnf: 5,
+};
 
 export interface GMState {
   raceState: RaceState;
@@ -1588,9 +1603,26 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   const attackerTeam = state.teams.find(t => t.id === attacker.teamId)!;
   const defenderTeam = state.teams.find(t => t.id === defender.teamId)!;
 
-  // Base outcomes from each driver's own d6
-  let attackerOutcome = resolveAwarenessD6Outcome(effectiveDiff, attackerRoll);
-  let defenderOutcome = resolveAwarenessD6Outcome(effectiveDiff, defenderRoll);
+  // Lightweight Parts Awareness risk:
+  // If a team with Lightweight Parts has a driver whose Awareness is
+  // lower than the opponent's by 5+, that driver automatically DNFs.
+  const attackerTeamTraitId = attackerTeam.traitId ?? attackerTeam.trait ?? null;
+  const defenderTeamTraitId = defenderTeam.traitId ?? defenderTeam.trait ?? null;
+  const attackerAw = attacker.awareness;
+  const defenderAw = defender.awareness;
+
+  const attackerForcedDNF =
+    attackerTeamTraitId === 'lightweight_parts' && defenderAw - attackerAw >= 5;
+  const defenderForcedDNF =
+    defenderTeamTraitId === 'lightweight_parts' && attackerAw - defenderAw >= 5;
+
+  // Base outcomes from each driver's own d6 (unless forced DNF above)
+  let attackerOutcome: AwarenessOutcome = attackerForcedDNF
+    ? 'dnf'
+    : resolveAwarenessD6Outcome(effectiveDiff, attackerRoll);
+  let defenderOutcome: AwarenessOutcome = defenderForcedDNF
+    ? 'dnf'
+    : resolveAwarenessD6Outcome(effectiveDiff, defenderRoll);
 
   // Evasion priority applies only to the higher-awareness driver.
   const { hasEvasion, evasionDriverId } = checkEvasionPriority(attacker.awareness, defender.awareness);
@@ -1603,27 +1635,31 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   }
 
   // Apply awareness outcome–modifying traits independently per driver
-  const attackerTraitAdjusted = applyAwarenessOutcomeTraits({
-    track: race.track,
-    attacker: defender,          // other driver
-    defender: attacker,          // the driver whose traits we care about
-    attackerTeam: defenderTeam,
-    defenderTeam: attackerTeam,
-    awarenessDifference: effectiveDiff,
-    baseOutcome: attackerOutcome,
-  });
-  attackerOutcome = attackerTraitAdjusted.outcome;
+  if (!attackerForcedDNF) {
+    const attackerTraitAdjusted = applyAwarenessOutcomeTraits({
+      track: race.track,
+      attacker: defender,          // other driver
+      defender: attacker,          // the driver whose traits we care about
+      attackerTeam: defenderTeam,
+      defenderTeam: attackerTeam,
+      awarenessDifference: effectiveDiff,
+      baseOutcome: attackerOutcome,
+    });
+    attackerOutcome = attackerTraitAdjusted.outcome;
+  }
 
-  const defenderTraitAdjusted = applyAwarenessOutcomeTraits({
-    track: race.track,
-    attacker,
-    defender,
-    attackerTeam,
-    defenderTeam,
-    awarenessDifference: effectiveDiff,
-    baseOutcome: defenderOutcome,
-  });
-  defenderOutcome = defenderTraitAdjusted.outcome;
+  if (!defenderForcedDNF) {
+    const defenderTraitAdjusted = applyAwarenessOutcomeTraits({
+      track: race.track,
+      attacker,
+      defender,
+      attackerTeam,
+      defenderTeam,
+      awarenessDifference: effectiveDiff,
+      baseOutcome: defenderOutcome,
+    });
+    defenderOutcome = defenderTraitAdjusted.outcome;
+  }
 
   race.eventLog.push({
     lap: race.currentLap,
@@ -1633,6 +1669,28 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
 
   const aState = race.standings.find(s => s.driverId === attackerId)!;
   const dState = race.standings.find(s => s.driverId === defenderId)!;
+
+  // Reactive Suspension safety rule: if this Awareness resolution was
+  // reached via a reroll, only apply the new defender outcome if it is
+  // "safer" than the original. Otherwise, keep the original; if that
+  // original was Position Swap, downgrade to a simple -1 position loss.
+  const originalDefenderOutcome = ctx?.originalDefenderOutcome as AwarenessOutcome | undefined;
+  const rsConsumed = (ctx?.rsConsumed as boolean | undefined) ?? false;
+  let defenderPositionShiftAsDropOne = false;
+
+  if (rsConsumed && originalDefenderOutcome) {
+    const newTier = AWARENESS_RISK_TIER[defenderOutcome];
+    const origTier = AWARENESS_RISK_TIER[originalDefenderOutcome];
+    if (newTier < origTier) {
+      // New outcome is safer — accept it as-is.
+    } else {
+      // New is equal or riskier — revert to original.
+      if (originalDefenderOutcome === 'positionShift') {
+        defenderPositionShiftAsDropOne = true;
+      }
+      defenderOutcome = originalDefenderOutcome;
+    }
+  }
 
   // 1) Damage escalations (self-only)
   const applyDamage = (driverState: typeof aState, outcome: AwarenessOutcome) => {
@@ -1686,7 +1744,17 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
     second.position = tmp;
   };
 
-  if (aPosShift && dPosShift) {
+  if (defenderPositionShiftAsDropOne) {
+    // Special RS fallback: original outcome was Position Swap but the
+    // reroll was worse. Instead of a full swap, the defender simply
+    // drops one position.
+    applyPositionLoss(race, defenderId, 1);
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'awareness',
+      description: `${defender.name} keeps original Position Swap via Reactive Suspension fallback — drops one position instead of full swap.`,
+    });
+  } else if (aPosShift && dPosShift) {
     // Both got position shift → higher Awareness driver ends ahead.
     const attackerAw = attacker.awareness;
     const defenderAw = defender.awareness;
