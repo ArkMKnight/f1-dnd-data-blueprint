@@ -846,287 +846,295 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
         {race.isComplete && <Badge className="bg-green-600 text-white">RACE COMPLETE</Badge>}
       </div>
 
-      {/* Current Standings (drag driver name to reorder) */}
-      <Card>
-        <CardHeader className="py-3">
-          <CardTitle className="text-sm">Current Standings</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y">
-            {race.standings
-              .sort((a, b) => a.position - b.position)
-              .map(s => {
-                const driver = drivers.find(d => d.id === s.driverId);
-                const team = driver ? teams.find(t => t.id === driver.teamId) : null;
-                const delta = positionDeltas[s.driverId] ?? 0;
-                const movedUp = delta < 0;
-                const movedDown = delta > 0;
-                const hasDelta = movedUp || movedDown;
-                return (
-                  <ContextMenu key={s.driverId}>
-                    <ContextMenuTrigger asChild>
-                      <div
-                        className={[
-                          'flex items-center justify-between px-4 py-2 text-sm cursor-default transition-all duration-500 ease-out',
-                          hasDelta ? 'scale-[1.04] bg-primary/10 ring-2 ring-primary/50 shadow-md' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        onDragOver={event => {
-                          event.preventDefault();
-                          event.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDrop={handleStandingsDrop(s.driverId)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold w-10 text-left flex items-center gap-1">
-                            <span>
-                              P{s.position}
-                            </span>
-                            {movedUp && (
-                              <span className="text-emerald-500 font-semibold text-sm translate-y-[-1px]">
-                                ↑
-                              </span>
-                            )}
-                            {movedDown && (
-                              <span className="text-red-500 font-semibold text-sm translate-y-[-1px]">
-                                ↓
-                              </span>
-                            )}
-                          </span>
+      {/* Main layout: Standings (left) + right column (commentary / events / GM roller) */}
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        {/* Standings column */}
+        <div className="flex-1 min-w-0">
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm">Current Standings</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y">
+                {race.standings
+                  .sort((a, b) => a.position - b.position)
+                  .map(s => {
+                    const driver = drivers.find(d => d.id === s.driverId);
+                    const team = driver ? teams.find(t => t.id === driver.teamId) : null;
+                    const delta = positionDeltas[s.driverId] ?? 0;
+                    const movedUp = delta < 0;
+                    const movedDown = delta > 0;
+                    const hasDelta = movedUp || movedDown;
+                    return (
+                      <ContextMenu key={s.driverId}>
+                        <ContextMenuTrigger asChild>
                           <div
-                            draggable
-                            onDragStart={handleStandingsDragStart(s.driverId)}
-                            className="cursor-move"
-                            title="Drag to manually reorder this driver"
+                            className={[
+                              'flex items-center justify-between px-4 py-2 text-sm cursor-default transition-all duration-500 ease-out',
+                              hasDelta ? 'scale-[1.04] bg-primary/10 ring-2 ring-primary/50 shadow-md' : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' ')}
+                            onDragOver={event => {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = 'move';
+                            }}
+                            onDrop={handleStandingsDrop(s.driverId)}
                           >
-                            <DriverNameWithTeamColors
-                              driver={driver ?? null}
-                              team={team ?? null}
-                              nameFallback={s.driverId}
-                              nameClassName={s.isDNF ? 'line-through text-muted-foreground' : ''}
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className={cn('text-xs', COMPOUND_BADGE_CLASS[s.tyreState.compound])}
-                            >
-                              {formatTyreLabel(race.track, s.tyreState.compound, s.tyreState.currentLap)}
-                            </Badge>
-                            {s.damageState.state !== 'none' && (
-                              <Badge variant="destructive" className="text-xs">
-                                {s.damageState.state}
-                              </Badge>
-                            )}
-                            {s.isDNF && (
-                              <Badge variant="destructive" className="text-xs">
-                                DNF
-                              </Badge>
-                            )}
-                            {s.pitCount > 0 && (
-                              <Badge variant="secondary" className="text-xs">
-                                {s.pitCount} pit
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <label className="flex items-center gap-1 text-[11px]">
-                              <input
-                                type="checkbox"
-                                className="h-3 w-3"
-                                checked={s.tyreState.pendingPit.active}
-                                onChange={e =>
-                                  handleTogglePendingPit(s.driverId, e.target.checked)
-                                }
-                              />
-                              <span>PIT</span>
-                            </label>
-                            {s.tyreState.pendingPit.active && (
-                              <select
-                                className="border rounded px-1 py-0.5 text-[11px] bg-background"
-                                value={s.tyreState.pendingPit.compound ?? s.tyreState.compound}
-                                onChange={e =>
-                                  handleChangePendingPitCompound(
-                                    s.driverId,
-                                    e.target.value as TyreCompound
-                                  )
-                                }
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold w-10 text-left flex items-center gap-1">
+                                <span>
+                                  P{s.position}
+                                </span>
+                                {movedUp && (
+                                  <span className="text-emerald-500 font-semibold text-sm translate-y-[-1px]">
+                                    ↑
+                                  </span>
+                                )}
+                                {movedDown && (
+                                  <span className="text-red-500 font-semibold text-sm translate-y-[-1px]">
+                                    ↓
+                                  </span>
+                                )}
+                              </span>
+                              <div
+                                draggable
+                                onDragStart={handleStandingsDragStart(s.driverId)}
+                                className="cursor-move"
+                                title="Drag to manually reorder this driver"
                               >
-                                <option value="soft">Pit for Softs</option>
-                                <option value="medium">Pit for Mediums</option>
-                                <option value="hard">Pit for Hards</option>
-                                <option value="intermediate">Pit for Inters</option>
-                                <option value="wet">Pit for Wets</option>
-                              </select>
-                            )}
+                                <DriverNameWithTeamColors
+                                  driver={driver ?? null}
+                                  team={team ?? null}
+                                  nameFallback={s.driverId}
+                                  nameClassName={s.isDNF ? 'line-through text-muted-foreground' : ''}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={cn('text-xs', COMPOUND_BADGE_CLASS[s.tyreState.compound])}
+                                >
+                                  {formatTyreLabel(race.track, s.tyreState.compound, s.tyreState.currentLap)}
+                                </Badge>
+                                {s.damageState.state !== 'none' && (
+                                  <Badge variant="destructive" className="text-xs">
+                                    {s.damageState.state}
+                                  </Badge>
+                                )}
+                                {s.isDNF && (
+                                  <Badge variant="destructive" className="text-xs">
+                                    DNF
+                                  </Badge>
+                                )}
+                                {s.pitCount > 0 && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {s.pitCount} pit
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <label className="flex items-center gap-1 text-[11px]">
+                                  <input
+                                    type="checkbox"
+                                    className="h-3 w-3"
+                                    checked={s.tyreState.pendingPit.active}
+                                    onChange={e =>
+                                      handleTogglePendingPit(s.driverId, e.target.checked)
+                                    }
+                                  />
+                                  <span>PIT</span>
+                                </label>
+                                {s.tyreState.pendingPit.active && (
+                                  <select
+                                    className="border rounded px-1 py-0.5 text-[11px] bg-background"
+                                    value={s.tyreState.pendingPit.compound ?? s.tyreState.compound}
+                                    onChange={e =>
+                                      handleChangePendingPitCompound(
+                                        s.driverId,
+                                        e.target.value as TyreCompound
+                                      )
+                                    }
+                                  >
+                                    <option value="soft">Pit for Softs</option>
+                                    <option value="medium">Pit for Mediums</option>
+                                    <option value="hard">Pit for Hards</option>
+                                    <option value="intermediate">Pit for Inters</option>
+                                    <option value="wet">Pit for Wets</option>
+                                  </select>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </div>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent>
-                      <ContextMenuLabel>Set damage</ContextMenuLabel>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'none')}>
-                        None
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'minor')}>
-                        Minor
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'major')}>
-                        Major
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'dnf')}>
-                        DNF
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-                );
-              })}
-          </div>
-        </CardContent>
-      </Card>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuLabel>Set damage</ContextMenuLabel>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'none')}>
+                            None
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'minor')}>
+                            Minor
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'major')}>
+                            Major
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleAssignDamage(s.driverId, 'dnf')}>
+                            DNF
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    );
+                  })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* Commentary card */}
-      <Card>
-        <CardHeader className="py-3">
-          <CardTitle className="text-sm">Commentary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {commentary ? (
-            <p className="text-sm leading-relaxed">{commentary}</p>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No contest has been resolved yet. Commentary will appear here after the next overtake attempt.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Live race event feed */}
-      <LiveRaceEventFeed
-        events={race.liveEvents ?? []}
-        drivers={drivers}
-        teams={teams}
-      />
-
-      {/* Tyre selection lock (post-puncture) */}
-      {isRaceLockedForTyres && (
-        <Card className="border-yellow-500/60 bg-yellow-500/5">
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm">Tyre Selection Required</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm">
-              Driver must select new tyre compound before the race can continue.
-            </p>
-            <div className="space-y-2">
-              {awaitingSelectionDrivers.map(s => {
-                const driver = drivers.find(d => d.id === s.driverId);
-                const name = driver?.name ?? s.driverId;
-                const current = s.tyreState.compound;
-                return (
-                  <div key={s.driverId} className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium">{name}</span>
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="border rounded px-1 py-0.5 text-[11px] bg-background"
-                        value={current}
-                        onChange={e =>
-                          handleAssignTyreSelection(
-                            s.driverId,
-                            e.target.value as TyreCompound
-                          )
-                        }
-                      >
-                        <option value="soft">Soft</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
-                        <option value="intermediate">Inter</option>
-                        <option value="wet">Wet</option>
-                      </select>
-                      <Badge variant="outline" className={cn('text-[10px] py-0', COMPOUND_BADGE_CLASS[current])}>
-                        {current}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-              {awaitingSelectionDrivers.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  No drivers currently awaiting tyre selection.
+        {/* Right column: Commentary / Events / GM Roller + Tyre lock */}
+        <div className="w-full lg:w-80 xl:w-96 space-y-4">
+          {/* Commentary card */}
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm">Commentary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {commentary ? (
+                <p className="text-sm leading-relaxed">{commentary}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No contest has been resolved yet. Commentary will appear here after the next overtake attempt.
                 </p>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
 
-      {/* GM Prompt */}
-      {prompt && !race.isComplete && !isRaceLockedForTyres && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm">GM Action Required</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm">{prompt.description}</p>
+          {/* Live race event feed */}
+          <LiveRaceEventFeed
+            events={race.liveEvents ?? []}
+            drivers={drivers}
+            teams={teams}
+          />
 
-            {prompt.inputType === 'roll' && (
-              <div className="space-y-2">
-                {(prompt.context?.activationOptions as ActivationOption[])?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <span className="text-xs text-muted-foreground self-center">Activate trait:</span>
-                    {(prompt.context.activationOptions as ActivationOption[]).map((opt) => {
-                      const activated = (prompt.context?.activatedTraits as { attacker?: string[]; defender?: string[] })?.[opt.forRole]?.includes(opt.traitId) ?? false;
-                      return (
-                        <Button
-                          key={`${opt.traitId}-${opt.forRole}`}
-                          size="sm"
-                          variant={activated ? 'default' : 'outline'}
-                          disabled={activated}
-                          onClick={() => !activated && handleChoice(`activate:${opt.traitId}:${opt.forRole}`)}
-                        >
-                          {opt.name} ({opt.forRole}){activated ? ' ✓' : ''}
-                        </Button>
-                      );
-                    })}
+          {/* Tyre selection lock (post-puncture) */}
+          {isRaceLockedForTyres && (
+            <Card className="border-yellow-500/60 bg-yellow-500/5">
+              <CardHeader className="py-3">
+                <CardTitle className="text-sm">Tyre Selection Required</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm">
+                  Driver must select new tyre compound before the race can continue.
+                </p>
+                <div className="space-y-2">
+                  {awaitingSelectionDrivers.map(s => {
+                    const driver = drivers.find(d => d.id === s.driverId);
+                    const name = driver?.name ?? s.driverId;
+                    const current = s.tyreState.compound;
+                    return (
+                      <div key={s.driverId} className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium">{name}</span>
+                        <div className="flex items-center gap-2">
+                          <select
+                            className="border rounded px-1 py-0.5 text-[11px] bg-background"
+                            value={current}
+                            onChange={e =>
+                              handleAssignTyreSelection(
+                                s.driverId,
+                                e.target.value as TyreCompound
+                              )
+                            }
+                          >
+                            <option value="soft">Soft</option>
+                            <option value="medium">Medium</option>
+                            <option value="hard">Hard</option>
+                            <option value="intermediate">Inter</option>
+                            <option value="wet">Wet</option>
+                          </select>
+                          <Badge variant="outline" className={cn('text-[10px] py-0', COMPOUND_BADGE_CLASS[current])}>
+                            {current}
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {awaitingSelectionDrivers.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No drivers currently awaiting tyre selection.
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* GM Prompt (GM Roller) */}
+          {prompt && !race.isComplete && !isRaceLockedForTyres && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="py-3">
+                <CardTitle className="text-sm">GM Action Required</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm">{prompt.description}</p>
+
+                {prompt.inputType === 'roll' && (
+                  <div className="space-y-2">
+                    {(prompt.context?.activationOptions as ActivationOption[])?.length > 0 && (
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <span className="text-xs text-muted-foreground self-center">Activate trait:</span>
+                        {(prompt.context.activationOptions as ActivationOption[]).map((opt) => {
+                          const activated = (prompt.context?.activatedTraits as { attacker?: string[]; defender?: string[] })?.[opt.forRole]?.includes(opt.traitId) ?? false;
+                          return (
+                            <Button
+                              key={`${opt.traitId}-${opt.forRole}`}
+                              size="sm"
+                              variant={activated ? 'default' : 'outline'}
+                              disabled={activated}
+                              onClick={() => !activated && handleChoice(`activate:${opt.traitId}:${opt.forRole}`)}
+                            >
+                              {opt.name} ({opt.forRole}){activated ? ' ✓' : ''}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={prompt.diceSize}
+                        placeholder={`1-${prompt.diceSize}`}
+                        value={rollInput}
+                        onChange={(e) => setRollInput(e.target.value)}
+                        className="w-24"
+                        onKeyDown={(e) => e.key === 'Enter' && handleSubmitRoll()}
+                      />
+                      <Button size="sm" onClick={handleSubmitRoll}>Submit</Button>
+                      <Button size="sm" variant="secondary" onClick={handleAutoRoll}>Auto Roll</Button>
+                    </div>
                   </div>
                 )}
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={prompt.diceSize}
-                    placeholder={`1-${prompt.diceSize}`}
-                    value={rollInput}
-                    onChange={(e) => setRollInput(e.target.value)}
-                    className="w-24"
-                    onKeyDown={(e) => e.key === 'Enter' && handleSubmitRoll()}
-                  />
-                  <Button size="sm" onClick={handleSubmitRoll}>Submit</Button>
-                  <Button size="sm" variant="secondary" onClick={handleAutoRoll}>Auto Roll</Button>
-                </div>
-              </div>
-            )}
 
-            {prompt.inputType === 'choice' && prompt.choices && (
-              <div className="flex gap-2 flex-wrap">
-                {prompt.choices.map(c => (
-                  <Button key={c.value} size="sm" variant="outline" onClick={() => handleChoice(c.value)}>
-                    {c.label}
-                  </Button>
-                ))}
-              </div>
-            )}
+                {prompt.inputType === 'choice' && prompt.choices && (
+                  <div className="flex gap-2 flex-wrap">
+                    {prompt.choices.map(c => (
+                      <Button key={c.value} size="sm" variant="outline" onClick={() => handleChoice(c.value)}>
+                        {c.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
 
-            {prompt.inputType === 'confirm' && (
-              <Button size="sm" onClick={handleConfirm}>Continue</Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                {prompt.inputType === 'confirm' && (
+                  <Button size="sm" onClick={handleConfirm}>Continue</Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
 
       {/* Event Log */}
       <Collapsible defaultOpen className="group">
