@@ -29,7 +29,7 @@ export type RacePhase =
 
 export type TyreCompound = 'soft' | 'medium' | 'hard' | 'intermediate' | 'wet';
 
-export type WeatherCondition = 'dry' | 'wet' | 'heavyWet';
+export type WeatherCondition = 'sunny' | 'wetSpots' | 'damp' | 'wet' | 'drenched';
 
 // Tyre status bands per track/compound:
 // - fresh: full compound modifier (Soft +2, Medium +1, Hard 0)

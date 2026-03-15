@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Driver, Car, Track, RaceConfig, Team, TyreCompound, SavedRaceSummary } from '@/types/game';
+import type { Driver, Car, Track, RaceConfig, Team, TyreCompound, SavedRaceSummary, WeatherCondition } from '@/types/game';
 import type { DamageState } from '@/types/game';
 import { initGMSession, advanceGMState, type GMState, type ActivationOption } from '@/lib/simulation/gm-engine';
 import { reorderGridWithEvent } from '@/lib/simulation/race-engine';
@@ -40,9 +40,10 @@ const COMPOUND_BADGE_CLASS: Record<TyreCompound, string> = {
 const formatTyreLabel = (
   track: Track,
   compound: TyreCompound,
-  currentLapOnTyre: number
+  currentLapOnTyre: number,
+  weather: WeatherCondition
 ): string => {
-  const status = getTyreStatus(track, compound, currentLapOnTyre);
+  const status = getTyreStatus(track, compound, currentLapOnTyre, weather);
   const statusLabel =
     status === 'fresh'
       ? 'Fresh'
@@ -410,6 +411,14 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     setGmState({
       ...gmState,
       raceState: { ...gmState.raceState, raceFlag: flag },
+    });
+  }, [gmState]);
+
+  const handleSetWeather = useCallback((weather: WeatherCondition) => {
+    if (!gmState) return;
+    setGmState({
+      ...gmState,
+      raceState: { ...gmState.raceState, weather },
     });
   }, [gmState]);
 
@@ -842,6 +851,30 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <Badge variant="outline" className="cursor-context-menu">
+              {race.weather === 'sunny'
+                ? '☀️ Sunny'
+                : race.weather === 'wetSpots'
+                ? '🌦️ Wet Spots'
+                : race.weather === 'damp'
+                ? '🌧️ Damp'
+                : race.weather === 'wet'
+                ? '🌧️ Wet'
+                : '🌊 Drenched'}
+            </Badge>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuLabel>Set weather</ContextMenuLabel>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => handleSetWeather('sunny')}>☀️ Sunny</ContextMenuItem>
+            <ContextMenuItem onClick={() => handleSetWeather('wetSpots')}>🌦️ Wet Spots</ContextMenuItem>
+            <ContextMenuItem onClick={() => handleSetWeather('damp')}>🌧️ Damp</ContextMenuItem>
+            <ContextMenuItem onClick={() => handleSetWeather('wet')}>🌧️ Wet</ContextMenuItem>
+            <ContextMenuItem onClick={() => handleSetWeather('drenched')}>🌊 Drenched</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <Badge variant="secondary">{gmState.currentPhase}</Badge>
         {race.isComplete && <Badge className="bg-green-600 text-white">RACE COMPLETE</Badge>}
       </div>
@@ -917,7 +950,12 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
                                   variant="outline"
                                   className={cn('text-xs', COMPOUND_BADGE_CLASS[s.tyreState.compound])}
                                 >
-                                  {formatTyreLabel(race.track, s.tyreState.compound, s.tyreState.currentLap)}
+                                  {formatTyreLabel(
+                                    race.track,
+                                    s.tyreState.compound,
+                                    s.tyreState.currentLap,
+                                    race.weather
+                                  )}
                                 </Badge>
                                 {s.damageState.state !== 'none' && (
                                   <Badge variant="destructive" className="text-xs">

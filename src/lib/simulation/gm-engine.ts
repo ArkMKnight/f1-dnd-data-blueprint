@@ -805,7 +805,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
         if (s.isDNF) return;
         const driver = race.drivers.find(d => d.id === s.driverId)!;
 
-        const status = getTyreStatus(race.track, s.tyreState.compound, s.tyreState.currentLap);
+        const status = getTyreStatus(race.track, s.tyreState.compound, s.tyreState.currentLap, race.weather);
         const prevExceeded = s.tyreState.hasExceededHiddenLimit;
         const hasExceeded = status === 'worn' || status === 'dead';
         const isDead = status === 'dead';
@@ -1004,8 +1004,8 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
   // Monaco Track Trait — "Watch your Step"
   aRacecraftMod += getMonacoRacecraftBonus(race.track, attacker, defender);
   dRacecraftMod += getMonacoRacecraftBonus(race.track, defender, attacker);
-  const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track);
-  const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track);
+  const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track, race.weather);
+  const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track, race.weather);
   const aPaceWithTyre = aPaceMod + aTyreMods.paceDelta;
   const dPaceWithTyre = dPaceMod + dTyreMods.paceDelta;
 

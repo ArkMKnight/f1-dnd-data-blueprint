@@ -150,10 +150,22 @@ const BASE_PACE_BY_COMPOUND: Record<TyreCompound, number> = {
 export const getTyreStatus = (
   track: Track,
   compound: TyreCompound,
-  lapsOnTyre: number
+  lapsOnTyre: number,
+  weather: WeatherCondition = 'sunny'
 ): TyreStatus => {
   const bands = track.tyreStatusBands[compound];
-  const lap = lapsOnTyre;
+
+  // Weather-based life adjustments: certain tyres "last half as long"
+  let lap = lapsOnTyre;
+  if (weather === 'sunny') {
+    if (compound === 'intermediate' || compound === 'wet') {
+      lap = lapsOnTyre * 2;
+    }
+  } else if (weather === 'wetSpots' || weather === 'damp') {
+    if (compound === 'wet') {
+      lap = lapsOnTyre * 2;
+    }
+  }
 
   if (lap >= bands.deadFromLap) {
     return 'dead';
@@ -173,9 +185,10 @@ export const getTyreStatus = (
 
 export const getTyrePhase1Modifiers = (
   tyre: DriverTyreState,
-  track: Track
+  track: Track,
+  weather: WeatherCondition = 'sunny'
 ): TyrePhase1Modifiers => {
-  const status = getTyreStatus(track, tyre.compound, tyre.currentLap);
+  const status = getTyreStatus(track, tyre.compound, tyre.currentLap, weather);
 
   // Start from universal base modifier for this compound
   let paceDelta = BASE_PACE_BY_COMPOUND[tyre.compound] ?? 0;
@@ -197,6 +210,25 @@ export const getTyrePhase1Modifiers = (
       paceDelta = -2;
     } else {
       paceDelta = -1;
+    }
+  }
+
+  // Weather-based Pace penalties for running the wrong tyre
+  const isDryTyre = tyre.compound === 'soft' || tyre.compound === 'medium' || tyre.compound === 'hard';
+  if (weather === 'damp' || weather === 'wet') {
+    if (isDryTyre) {
+      paceDelta -= 3;
+    }
+    if (weather === 'wet') {
+      if (tyre.compound === 'intermediate') {
+        paceDelta -= 1;
+      } else if (tyre.compound === 'wet') {
+        paceDelta -= 2;
+      }
+    }
+  } else if (weather === 'drenched') {
+    if (isDryTyre || tyre.compound === 'intermediate') {
+      paceDelta -= 3;
     }
   }
 

@@ -81,6 +81,7 @@ export interface RaceState {
   eventLog: RaceLogEvent[];
   liveEvents: RaceEvent[];
   raceFlag: 'green' | 'safetyCar' | 'redFlag';
+  weather: WeatherCondition;
   isComplete: boolean;
   /** When provided, trait engine is used for contested rolls and awareness. */
   teams?: Team[];
@@ -189,6 +190,7 @@ export const initializeRace = (
     eventLog: [],
     liveEvents: [],
     raceFlag: 'green',
+    weather: track.weather ?? 'sunny',
     isComplete: false,
     experimentalPartsOnes: {},
     startingCompoundsByDriver: startingCompoundsByDriver ?? undefined,
@@ -471,8 +473,8 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     attackerRacecraftMod += getMonacoRacecraftBonus(newState.track, attacker, defender);
     defenderRacecraftMod += getMonacoRacecraftBonus(newState.track, defender, attacker);
 
-    const attackerTyreMods = getTyrePhase1Modifiers(attackerState.tyreState, newState.track);
-    const defenderTyreMods = getTyrePhase1Modifiers(defenderState.tyreState, newState.track);
+    const attackerTyreMods = getTyrePhase1Modifiers(attackerState.tyreState, newState.track, newState.weather);
+    const defenderTyreMods = getTyrePhase1Modifiers(defenderState.tyreState, newState.track, newState.weather);
 
     const attackerPaceMod = attackerBasePaceMod + attackerTyreMods.paceDelta;
     const defenderPaceMod = defenderBasePaceMod + defenderTyreMods.paceDelta;
@@ -1356,7 +1358,7 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     if (s.isDNF) return;
     const driver = newState.drivers.find(d => d.id === s.driverId)!;
 
-    const status = getTyreStatus(newState.track, s.tyreState.compound, s.tyreState.currentLap);
+    const status = getTyreStatus(newState.track, s.tyreState.compound, s.tyreState.currentLap, newState.weather);
 
     const prevExceeded = s.tyreState.hasExceededHiddenLimit;
     const hasExceeded = status === 'worn' || status === 'dead';

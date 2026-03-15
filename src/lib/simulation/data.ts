@@ -143,7 +143,7 @@ export const TRACKS: Track[] = [
     pitLossNormal: 8, pitLossSafetyCar: 4, pitLossFrontWing: 1, pitLossDoubleStack: 6,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
-    weather: 'dry',
+    weather: 'sunny',
     tyreStatusBands: {
       soft:  { freshUntilLap: 18, baseUntilLap: 20, wornUntilLap: 24, deadFromLap: 25 },
       medium:{ freshUntilLap: 30, baseUntilLap: 37, wornUntilLap: 37, deadFromLap: 38 },
@@ -160,7 +160,7 @@ export const TRACKS: Track[] = [
     pitLossNormal: 3, pitLossSafetyCar: 1, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
-    weather: 'dry',
+    weather: 'sunny',
     tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
   {
@@ -171,7 +171,7 @@ export const TRACKS: Track[] = [
     pitLossNormal: 3, pitLossSafetyCar: 1, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
-    weather: 'dry',
+    weather: 'sunny',
     tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
   {
@@ -182,7 +182,7 @@ export const TRACKS: Track[] = [
     pitLossNormal: 3, pitLossSafetyCar: 2, pitLossFrontWing: 1, pitLossDoubleStack: 1,
     tyreDegradation: DEFAULT_TYRE_DEGRADATION,
     deterministicTraits: [], conditionalTraits: [],
-    weather: 'dry',
+    weather: 'sunny',
     tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
 ];
