@@ -215,9 +215,15 @@ export const getTyrePhase1Modifiers = (
 
   // Weather-based Pace penalties for running the wrong tyre
   const isDryTyre = tyre.compound === 'soft' || tyre.compound === 'medium' || tyre.compound === 'hard';
-  if (weather === 'damp' || weather === 'wet') {
-    if (isDryTyre) {
+  if (weather === 'sunny') {
+    // In sunny conditions, Inters and Wets get -3 Pace
+    if (tyre.compound === 'intermediate' || tyre.compound === 'wet') {
       paceDelta -= 3;
+    }
+  } else if (weather === 'damp' || weather === 'wet') {
+    if (isDryTyre) {
+      // In wet conditions, dry tyres have a flat -3 modifier (ignores base/status value)
+      paceDelta = -3;
     }
     if (weather === 'wet') {
       if (tyre.compound === 'intermediate') {
@@ -228,7 +234,8 @@ export const getTyrePhase1Modifiers = (
     }
   } else if (weather === 'drenched') {
     if (isDryTyre || tyre.compound === 'intermediate') {
-      paceDelta -= 3;
+      // In drenched conditions, dry tyres and Inters have a flat -3 modifier
+      paceDelta = -3;
     }
   }
 

@@ -115,10 +115,12 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
     [raceConfig, track]
   );
 
-  const hasMissingTeamTrait = useMemo(
-    () => teams.some(team => !(team.traitId ?? team.trait)),
-    [teams]
-  );
+  const hasMissingTeamTrait = useMemo(() => {
+    const participatingTeamIds = new Set(drivers.map(d => d.teamId));
+    return teams
+      .filter(team => participatingTeamIds.has(team.id))
+      .some(team => !(team.traitId ?? team.trait));
+  }, [drivers, teams]);
 
   // Stable key for "which drivers are in the race" so we only reset when the set changes, not on every parent re-render
   const participatingDriverIdsKey = useMemo(

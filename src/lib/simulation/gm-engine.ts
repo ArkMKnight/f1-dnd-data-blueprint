@@ -1256,7 +1256,23 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
 
     // Normal awareness check for successful overtake
     const rollDiff = Math.abs(aTotal - dTotal);
-    if (shouldTriggerAwarenessCheck(rollDiff)) {
+    const wetWeather = race.weather === 'damp' || race.weather === 'wet' || race.weather === 'drenched';
+    const attackerBaseThreshold = 10 - Math.floor(attacker.adaptability / 2);
+    const defenderBaseThreshold = 10 - Math.floor(defender.adaptability / 2);
+    const attackerOnDry =
+      aState.tyreState.compound === 'soft' ||
+      aState.tyreState.compound === 'medium' ||
+      aState.tyreState.compound === 'hard';
+    const defenderOnDry =
+      dState.tyreState.compound === 'soft' ||
+      dState.tyreState.compound === 'medium' ||
+      dState.tyreState.compound === 'hard';
+    const attackerThreshold = attackerOnDry ? attackerBaseThreshold * 2 : attackerBaseThreshold;
+    const defenderThreshold = defenderOnDry ? defenderBaseThreshold * 2 : defenderBaseThreshold;
+    const wetForcingAwareness =
+      wetWeather &&
+      (attackerRoll <= attackerThreshold || defenderRoll <= defenderThreshold);
+    if (shouldTriggerAwarenessCheck(rollDiff) || wetForcingAwareness) {
       const defenderAwarenessForDiff = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
       const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiff);
       const category = determineAwarenessOutcomeCategory(difference);
@@ -1330,7 +1346,24 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
 
     const rollDiff = Math.abs(aTotal - dTotal);
     const attackerHasDragFocus = (attacker.traitId ?? attacker.trait) === 'drag_reduction_focus' && TRAITS_BY_ID['drag_reduction_focus']?.isEnabled;
-    const triggerAwarenessFailed = shouldTriggerAwarenessCheck(rollDiff) || (attackerHasDragFocus && rollDiff >= 8);
+    const wetWeather = race.weather === 'damp' || race.weather === 'wet' || race.weather === 'drenched';
+    const attackerBaseThreshold = 10 - Math.floor(attacker.adaptability / 2);
+    const defenderBaseThreshold = 10 - Math.floor(defender.adaptability / 2);
+    const attackerOnDry =
+      aState.tyreState.compound === 'soft' ||
+      aState.tyreState.compound === 'medium' ||
+      aState.tyreState.compound === 'hard';
+    const defenderOnDry =
+      dState.tyreState.compound === 'soft' ||
+      dState.tyreState.compound === 'medium' ||
+      dState.tyreState.compound === 'hard';
+    const attackerThreshold = attackerOnDry ? attackerBaseThreshold * 2 : attackerBaseThreshold;
+    const defenderThreshold = defenderOnDry ? defenderBaseThreshold * 2 : defenderBaseThreshold;
+    const wetForcingAwareness =
+      wetWeather &&
+      (attackerRoll <= attackerThreshold || defenderRoll <= defenderThreshold);
+    const triggerAwarenessFailed =
+      shouldTriggerAwarenessCheck(rollDiff) || (attackerHasDragFocus && rollDiff >= 8) || wetForcingAwareness;
     if (triggerAwarenessFailed) {
       const defenderAwarenessForDiff = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
       const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiff);

@@ -78,10 +78,12 @@ const AutoSimPanelComponent = ({ track, drivers, cars, teams, raceConfig, setRac
     setStrategyError(null);
   }, [drivers]);
 
-  const hasMissingTeamTrait = useMemo(
-    () => teams.some(team => !(team.traitId ?? team.trait)),
-    [teams]
-  );
+  const hasMissingTeamTrait = useMemo(() => {
+    const participatingTeamIds = new Set(drivers.map(d => d.teamId));
+    return teams
+      .filter(team => participatingTeamIds.has(team.id))
+      .some(team => !(team.traitId ?? team.trait));
+  }, [drivers, teams]);
 
   const validateLapCount = useCallback((raw: string): { valid: boolean; value?: number; error?: string } => {
     if (raw.trim() === '') {
