@@ -27,6 +27,7 @@ import { assignTyreCompoundForSelection, getTyreStatus } from '@/lib/simulation/
 import { cn } from '@/lib/utils';
 import { ChevronDown } from 'lucide-react';
 import { useData } from '@/context/DataContext';
+import { getTrackMatchScore } from '@/lib/simulation/track-compatibility';
 
 /** Background/border shade for tyre compound badges (text colour unchanged). */
 const COMPOUND_BADGE_CLASS: Record<TyreCompound, string> = {
@@ -79,6 +80,222 @@ interface GMModePanelProps {
 const MIN_LAPS = 1;
 const MAX_LAPS = 200;
 
+interface DriverXpSummary {
+  pace: number;
+  racecraft: number;
+  awareness: number;
+  adaptability: number;
+  qualifying: number;
+}
+
+const createEmptyXp = (): DriverXpSummary => ({
+  pace: 0,
+  racecraft: 0,
+  awareness: 0,
+  adaptability: 0,
+  qualifying: 0,
+});
+
+const computeRaceXp = (
+  gmState: GMState,
+  startingPositions: Record<string, number>
+): Record<string, DriverXpSummary> => {
+  const race = gmState.raceState;
+  const { drivers, cars, standings, liveEvents = [] } = race;
+
+  const xpByDriver: Record<string, DriverXpSummary> = {};
+  const getXp = (driverId: string): DriverXpSummary => {
+    if (!xpByDriver[driverId]) xpByDriver[driverId] = createEmptyXp();
+    return xpByDriver[driverId];
+  };
+
+  const driverById = Object.fromEntries(drivers.map(d => [d.id, d]));
+  const carByTeamId = Object.fromEntries(cars.map(c => [c.teamId, c]));
+
+  const track = race.track;
+
+  // Qualifying / starting XP (grid-based)
+  standings.forEach(s => {
+    const startPos = startingPositions[s.driverId] ?? s.position;
+    const xp = getXp(s.driverId);
+    if (startPos <= 2) {
+      xp.qualifying += 2; // front row
+    } else if (startPos <= 4) {
+      xp.qualifying += 1; // second row
+    }
+  });
+
+  // Beat teammate in qualifying: best starter per team
+  const driversByTeam: Record<string, string[]> = {};
+  drivers.forEach(d => {
+    if (!driversByTeam[d.teamId]) driversByTeam[d.teamId] = [];
+    driversByTeam[d.teamId].push(d.id);
+  });
+  Object.entries(driversByTeam).forEach(([teamId, teamDrivers]) => {
+    const starters = teamDrivers
+      .map(id => ({ id, pos: startingPositions[id] ?? Number.MAX_SAFE_INTEGER }))
+      .sort((a, b) => a.pos - b.pos);
+    if (starters.length >= 2 && starters[0].pos < Number.MAX_SAFE_INTEGER) {
+      getXp(starters[0].id).qualifying += 1;
+    }
+  });
+
+  // Pace & Racecraft from race events (overtake/defense), plus Adaptability (wet contests)
+  const wetOrMixed =
+    race.weather === 'damp' || race.weather === 'wet' || race.weather === 'drenched';
+
+  if (wetOrMixed) {
+    // Wet or mixed race: +1 Adaptability for every driver
+    standings.forEach(s => {
+      getXp(s.driverId).adaptability += 1;
+    });
+  }
+
+  liveEvents.forEach(e => {
+    if (e.type === 'overtake') {
+      const attackerId = e.primaryDriverId;
+      const defenderId = e.secondaryDriverId;
+      if (attackerId && defenderId) {
+        // Pace: successful overtake
+        getXp(attackerId).pace += 1;
+        // Racecraft: failed defense
+        getXp(defenderId).racecraft -= 1;
+        // Adaptability contests in wet
+        if (wetOrMixed) {
+          getXp(attackerId).adaptability += 1;
+          getXp(defenderId).adaptability -= 1;
+        }
+      }
+    } else if (e.type === 'defense') {
+      const defenderId = e.primaryDriverId;
+      const attackerId = e.secondaryDriverId;
+      if (attackerId && defenderId) {
+        // Pace: failed overtake
+        getXp(attackerId).pace -= 1;
+        // Racecraft: successful defense
+        getXp(defenderId).racecraft += 1;
+        // Adaptability contests in wet
+        if (wetOrMixed) {
+          getXp(defenderId).adaptability += 1;
+          getXp(attackerId).adaptability -= 1;
+        }
+      }
+    }
+  });
+
+  // Position-based XP (Pace & Racecraft) and Awareness from final damage state
+  const standingsByDriver: Record<string, typeof standings[number]> = {};
+  standings.forEach(s => {
+    standingsByDriver[s.driverId] = s;
+  });
+
+  // Beat teammate (Pace) and net positions (Racecraft), finish above quali (Racecraft)
+  Object.entries(driversByTeam).forEach(([teamId, teamDrivers]) => {
+    // Beat teammate in race: best finisher gets +1 Pace
+    const finishers = teamDrivers
+      .map(id => ({
+        id,
+        pos: standingsByDriver[id]?.position ?? Number.MAX_SAFE_INTEGER,
+      }))
+      .sort((a, b) => a.pos - b.pos);
+    if (finishers.length >= 2 && finishers[0].pos < Number.MAX_SAFE_INTEGER) {
+      getXp(finishers[0].id).pace += 1;
+    }
+  });
+
+  standings.forEach(s => {
+    const driverId = s.driverId;
+    const xp = getXp(driverId);
+    const startPos = startingPositions[driverId] ?? s.position;
+    const finishPos = s.position;
+
+    // Finish above qualifying
+    if (finishPos < startPos) {
+      xp.racecraft += 1;
+    }
+
+    // Net +4 positions gained
+    if (startPos - finishPos >= 4) {
+      xp.racecraft += 2;
+    }
+
+    // Awareness from final damage / DNF
+    if (s.isDNF || s.damageState.state === 'dnf' || s.damageState.state === 'major') {
+      xp.awareness -= 2;
+    } else if (s.damageState.state === 'minor') {
+      xp.awareness -= 1;
+    }
+  });
+
+  // Awareness: avoid crash via Awareness (miracleEscape) and "no incidents"
+  liveEvents.forEach(e => {
+    if (
+      e.type === 'incident' &&
+      e.description.toLowerCase().includes('awareness incident (miracleescape')
+    ) {
+      getXp(e.primaryDriverId).awareness += 1;
+    }
+  });
+
+  standings.forEach(s => {
+    const driverId = s.driverId;
+    const xp = getXp(driverId);
+    const hasDamage =
+      s.isDNF || s.damageState.state === 'minor' || s.damageState.state === 'major' || s.damageState.state === 'dnf';
+    const hasAwarenessIncident = liveEvents.some(
+      e =>
+        e.type === 'incident' &&
+        e.primaryDriverId === driverId &&
+        e.description.toLowerCase().includes('awareness incident')
+    );
+    if (!hasDamage && !hasAwarenessIncident) {
+      // No incidents: only clean racing
+      xp.awareness += 2;
+    }
+  });
+
+  // Adaptability: last to pit in wet race (approximation: last pit overall in wet/mixed race)
+  if (wetOrMixed) {
+    const pitEvents = liveEvents.filter(
+      e => e.type === 'incident' && e.description.toLowerCase().startsWith('pit stop')
+    );
+    if (pitEvents.length > 0) {
+      const lastPit = pitEvents.reduce((acc, ev) =>
+        ev.lapNumber > acc.lapNumber ? ev : acc
+      );
+      if (lastPit.primaryDriverId) {
+        getXp(lastPit.primaryDriverId).adaptability += 2;
+      }
+    }
+  }
+
+  // Pace: beat faster car (Car Match Score) — +1 total if any faster car finished behind
+  const matchScoreByDriver: Record<string, number> = {};
+  drivers.forEach(d => {
+    const car = carByTeamId[d.teamId];
+    if (car) {
+      matchScoreByDriver[d.id] = getTrackMatchScore(car, track);
+    }
+  });
+
+  standings.forEach(s => {
+    const myScore = matchScoreByDriver[s.driverId];
+    if (myScore == null) return;
+    const myPos = s.position;
+    const beatAnyFaster = standings.some(other => {
+      if (other.driverId === s.driverId) return false;
+      const otherScore = matchScoreByDriver[other.driverId];
+      if (otherScore == null) return false;
+      return otherScore > myScore && other.position > myPos;
+    });
+    if (beatAnyFaster) {
+      getXp(s.driverId).pace += 1;
+    }
+  });
+
+  return xpByDriver;
+};
+
 const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRaceConfig }: GMModePanelProps) => {
   const [gmState, setGmState] = useState<GMState | null>(null);
   const [rollInput, setRollInput] = useState('');
@@ -106,9 +323,11 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
   const [hasSavedCurrentRace, setHasSavedCurrentRace] = useState(false);
   const { addRaceToHistory } = useData();
   const [prevPositions, setPrevPositions] = useState<Record<string, number>>({});
+  const [startingPositions, setStartingPositions] = useState<Record<string, number>>({});
   const [positionDeltas, setPositionDeltas] = useState<Record<string, number>>({});
   const [commentary, setCommentary] = useState<string | null>(null);
   const [lastContestIndex, setLastContestIndex] = useState<number | null>(null);
+  const [showRaceXp, setShowRaceXp] = useState(false);
 
   const effectiveLapCount = useMemo(
     () => (raceConfig && raceConfig.trackId === track.id ? raceConfig.lapCount : track.lapCount),
@@ -272,6 +491,13 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       startingMap,
       plannedPits
     );
+    // Capture starting grid positions before the first GM step.
+    const grid: Record<string, number> = {};
+    session.raceState.standings.forEach(s => {
+      grid[s.driverId] = s.position;
+    });
+    setStartingPositions(grid);
+
     const advanced = advanceGMState(session);
     // Initialize previous positions from the first race state so we only show arrows on actual changes.
     const initialPrev: Record<string, number> = {};
@@ -1213,8 +1439,76 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
         </Card>
       </Collapsible>
 
+      {/* Race XP summary (read-only) */}
+      {race.isComplete && showRaceXp && gmState && (
+        <Card className="mt-4">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm">Driver Experience (XP)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              XP is informational only and does not currently change driver stats.
+            </p>
+            {Object.keys(startingPositions).length === 0 && (
+              <p className="text-xs text-destructive">
+                Starting grid data not available — XP may be incomplete if the race was loaded mid-session.
+              </p>
+            )}
+            {(() => {
+              const xpByDriver = computeRaceXp(gmState, startingPositions);
+              return (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-1 pr-2">Driver</th>
+                    <th className="py-1 px-2">Pace</th>
+                    <th className="py-1 px-2">Racecraft</th>
+                    <th className="py-1 px-2">Awareness</th>
+                    <th className="py-1 px-2">Adaptability</th>
+                    <th className="py-1 px-2">Qualifying</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {race.standings
+                    .slice()
+                    .sort((a, b) => a.position - b.position)
+                    .map(s => {
+                      const driver = drivers.find(d => d.id === s.driverId);
+                      const name = driver?.name ?? s.driverId;
+                      const xp = xpByDriver[s.driverId] ?? createEmptyXp();
+                      return (
+                        <tr key={s.driverId} className="border-b last:border-0">
+                          <td className="py-1 pr-2">
+                            <span className="font-medium">{name}</span>{' '}
+                            <span className="text-[10px] text-muted-foreground">P{s.position}{s.isDNF ? ' (DNF)' : ''}</span>
+                          </td>
+                          <td className="py-1 px-2 text-center">{xp.pace}</td>
+                          <td className="py-1 px-2 text-center">{xp.racecraft}</td>
+                          <td className="py-1 px-2 text-center">{xp.awareness}</td>
+                          <td className="py-1 px-2 text-center">{xp.adaptability}</td>
+                          <td className="py-1 px-2 text-center">{xp.qualifying}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      )}
+
       {race.isComplete && (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowRaceXp(prev => !prev)}
+          >
+            {showRaceXp ? 'Hide Race XP' : 'Race XP'}
+          </Button>
           <Button
             size="sm"
             variant="outline"
