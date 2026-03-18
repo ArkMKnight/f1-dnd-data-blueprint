@@ -37,6 +37,7 @@ import {
   getMonacoRacecraftBonus,
   getMexicoOvertakeRacecraftBonus,
   getMexicoDefendingAwarenessBonus,
+  capMexicoPaceContribution,
 } from './track-compatibility';
 import type { DriverRaceState, RaceState } from './race-engine';
 import { initializeRace, appendLiveRaceEvent } from './race-engine';
@@ -1144,6 +1145,25 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
   const dTraitPhase3 = defenderTraitResult.result.phase3Delta - dDmg - dPuncture;
   const dTraitTotal = dTraitPhase2 + dTraitPhase3 + (dAct.includes('power_unit_overdrive') ? 3 : 0);
 
+  const aRacecraftContribution = raceIntelligenceActive ? 2 * aRacecraftMod : aRacecraftMod;
+  const dRacecraftContribution = raceIntelligenceActive ? 2 * dRacecraftMod : dRacecraftMod;
+  const aBasePaceContribution = raceIntelligenceActive ? 0 : aPaceWithTyre;
+  const dBasePaceContribution = raceIntelligenceActive ? 0 : dPaceWithTyre;
+  const aPaceContribution = capMexicoPaceContribution(
+    attacker,
+    carA,
+    race.track,
+    aBasePaceContribution + aTraitTotal
+  );
+  const dPaceContribution = capMexicoPaceContribution(
+    defender,
+    carD,
+    race.track,
+    dBasePaceContribution + dTraitTotal
+  );
+  aTotal = attackerRoll + aRacecraftContribution + aPaceContribution + aDmg + aPuncture;
+  dTotal = defenderRoll + dRacecraftContribution + dPaceContribution + dDmg + dPuncture;
+
   const attackerTraitsLabel =
     aTraitTotal !== 0 ? ` + traits(${aTraitTotal >= 0 ? '+' : ''}${aTraitTotal})` : '';
   const defenderTraitsLabel =
@@ -1574,6 +1594,25 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
   const dTraitPhase2 = defenderTraitResult.result.phase2Delta;
   const dTraitPhase3 = defenderTraitResult.result.phase3Delta - dDmg;
   const dTraitTotal = dTraitPhase2 + dTraitPhase3 + (dAct.includes('power_unit_overdrive') ? 3 : 0);
+
+  const raRacecraftContribution = rRaceIntelligenceActive ? 2 * aRacecraftMod : aRacecraftMod;
+  const rdRacecraftContribution = rRaceIntelligenceActive ? 2 * dRacecraftMod : dRacecraftMod;
+  const raBasePaceContribution = rRaceIntelligenceActive ? 0 : aPaceWithTyre;
+  const rdBasePaceContribution = rRaceIntelligenceActive ? 0 : dPaceWithTyre;
+  const raPaceContribution = capMexicoPaceContribution(
+    attacker,
+    carA,
+    race.track,
+    raBasePaceContribution + aTraitTotal
+  );
+  const rdPaceContribution = capMexicoPaceContribution(
+    defender,
+    carD,
+    race.track,
+    rdBasePaceContribution + dTraitTotal
+  );
+  aTotal = attackerRoll + raRacecraftContribution + raPaceContribution + aDmg + aPuncture - 1;
+  dTotal = defenderRoll + rdRacecraftContribution + rdPaceContribution + dDmg + dPuncture;
 
   const attackerTraitsLabel =
     aTraitTotal !== 0 ? ` + traits(${aTraitTotal >= 0 ? '+' : ''}${aTraitTotal})` : '';

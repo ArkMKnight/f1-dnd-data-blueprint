@@ -43,6 +43,7 @@ import {
   getTrackBonusTiers,
   getMexicoOvertakeRacecraftBonus,
   getMexicoDefendingAwarenessBonus,
+  capMexicoPaceContribution,
 } from './track-compatibility';
 import { TRAITS_BY_ID } from '@/lib/trait-definitions';
 import {
@@ -538,10 +539,22 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
       });
       newState.traitRuntime = dTraitRes.runtime;
 
-      attackerTotal = aTraitRes.result.finalTotal;
-      defenderTotal = dTraitRes.result.finalTotal;
       const aT2 = aTraitRes.result.phase2Delta + aTraitRes.result.phase3Delta - attackerDmgMod;
       const dT2 = dTraitRes.result.phase2Delta + dTraitRes.result.phase3Delta - defenderDmgMod;
+      const attackerPaceContribution = capMexicoPaceContribution(
+        attacker,
+        carA,
+        newState.track,
+        attackerPaceMod + aT2
+      );
+      const defenderPaceContribution = capMexicoPaceContribution(
+        defender,
+        carD,
+        newState.track,
+        defenderPaceMod + dT2
+      );
+      attackerTotal = aRoll.roll + attackerPaceContribution + attackerRacecraftMod + attackerDmgMod + attackerPunctureMod;
+      defenderTotal = dRoll.roll + defenderPaceContribution + defenderRacecraftMod + defenderDmgMod + defenderPunctureMod;
       if (aT2 !== 0) attackerTraitsLabel = ` + traits(${aT2 >= 0 ? '+' : ''}${aT2})`;
       if (dT2 !== 0) defenderTraitsLabel = ` + traits(${dT2 >= 0 ? '+' : ''}${dT2})`;
 
@@ -551,8 +564,18 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
       if (aTr?.temporaryModifiers) delete aTr.temporaryModifiers['pace:nextRoll'];
       if (dTr?.temporaryModifiers) delete dTr.temporaryModifiers['pace:nextRoll'];
     } else {
-      attackerTotal = aRoll.roll + attackerPaceMod + attackerRacecraftMod + attackerDmgMod + attackerPunctureMod;
-      defenderTotal = dRoll.roll + defenderPaceMod + defenderRacecraftMod + defenderDmgMod + defenderPunctureMod;
+      attackerTotal =
+        aRoll.roll +
+        capMexicoPaceContribution(attacker, carA, newState.track, attackerPaceMod) +
+        attackerRacecraftMod +
+        attackerDmgMod +
+        attackerPunctureMod;
+      defenderTotal =
+        dRoll.roll +
+        capMexicoPaceContribution(defender, carD, newState.track, defenderPaceMod) +
+        defenderRacecraftMod +
+        defenderDmgMod +
+        defenderPunctureMod;
     }
 
     // Criticals are based on the raw d20 roll (not the total).
@@ -948,10 +971,33 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           });
           newState.traitRuntime = dRetryRes.runtime;
 
-          retryAttackerTotal = aRetryRes.result.finalTotal;
-          retryDefenderTotal = dRetryRes.result.finalTotal;
           const aR2 = aRetryRes.result.phase2Delta + aRetryRes.result.phase3Delta - (attackerDmgMod - 1);
           const dR2 = dRetryRes.result.phase2Delta + dRetryRes.result.phase3Delta - defenderDmgMod;
+          const retryAttackerPaceContribution = capMexicoPaceContribution(
+            attacker,
+            carA,
+            newState.track,
+            attackerPaceMod + aR2
+          );
+          const retryDefenderPaceContribution = capMexicoPaceContribution(
+            defender,
+            carD,
+            newState.track,
+            defenderPaceMod + dR2
+          );
+          retryAttackerTotal =
+            retryAttackerRoll.roll +
+            retryAttackerPaceContribution +
+            attackerRacecraftMod +
+            attackerDmgMod +
+            attackerPunctureMod -
+            1;
+          retryDefenderTotal =
+            retryDefenderRoll.roll +
+            retryDefenderPaceContribution +
+            defenderRacecraftMod +
+            defenderDmgMod +
+            defenderPunctureMod;
           if (aR2 !== 0) retryAttackerTraitsLabel = ` + traits(${aR2 >= 0 ? '+' : ''}${aR2})`;
           if (dR2 !== 0) retryDefenderTraitsLabel = ` + traits(${dR2 >= 0 ? '+' : ''}${dR2})`;
 
@@ -962,14 +1008,14 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         } else {
           retryAttackerTotal =
             retryAttackerRoll.roll +
-            attackerPaceMod +
+            capMexicoPaceContribution(attacker, carA, newState.track, attackerPaceMod) +
             attackerRacecraftMod +
             attackerDmgMod +
             attackerPunctureMod -
             1;
           retryDefenderTotal =
             retryDefenderRoll.roll +
-            defenderPaceMod +
+            capMexicoPaceContribution(defender, carD, newState.track, defenderPaceMod) +
             defenderRacecraftMod +
             defenderDmgMod +
             defenderPunctureMod;

@@ -99,6 +99,27 @@ export const getModifiedDriverStat = (
   return modified;
 };
 
+export const ignoresMexicoThinAir = (
+  driver: Driver,
+  car: Car,
+  track: Track
+): boolean => {
+  if (track.name !== 'Mexico') return false;
+  const matchScore = getTrackMatchScore(car, track);
+  return driver.adaptability >= 10 && getTrackBonusTiers(matchScore).trackSpecificBonusEligible;
+};
+
+export const capMexicoPaceContribution = (
+  driver: Driver,
+  car: Car,
+  track: Track,
+  paceContribution: number
+): number => {
+  if (track.name !== 'Mexico') return paceContribution;
+  if (ignoresMexicoThinAir(driver, car, track)) return paceContribution;
+  return paceContribution > 4 ? 4 : paceContribution;
+};
+
 // Get track match score for a car at a track
 export const getTrackMatchScore = (car: Car, track: Track): number => {
   return car[track.primaryCarStat] + car[track.secondaryCarStat];
