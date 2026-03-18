@@ -41,6 +41,8 @@ import {
   getMonacoRacecraftBonus,
   getTrackMatchScore,
   getTrackBonusTiers,
+  getMexicoOvertakeRacecraftBonus,
+  getMexicoDefendingAwarenessBonus,
 } from './track-compatibility';
 import { TRAITS_BY_ID } from '@/lib/trait-definitions';
 import {
@@ -467,11 +469,10 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
     const defenderBasePaceMod = getModifiedDriverStat(defender, 'pace', carD, newState.track);
     let defenderRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, newState.track);
 
-    // Monaco Track Trait — "Watch your Step":
-    // When fighting a driver with a lower (Racecraft - Pace) difference,
-    // gain +1 Racecraft for this contested check.
+    // Monaco / Mexico contested-roll track bonuses.
     attackerRacecraftMod += getMonacoRacecraftBonus(newState.track, attacker, defender);
     defenderRacecraftMod += getMonacoRacecraftBonus(newState.track, defender, attacker);
+    attackerRacecraftMod += getMexicoOvertakeRacecraftBonus(newState.track);
 
     const attackerTyreMods = getTyrePhase1Modifiers(attackerState.tyreState, newState.track, newState.weather);
     const defenderTyreMods = getTyrePhase1Modifiers(defenderState.tyreState, newState.track, newState.weather);
@@ -717,7 +718,10 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         wetWeather &&
         (aRoll.result.roll <= attackerThreshold || dRoll.result.roll <= defenderThreshold);
       if (shouldTriggerAwarenessCheck(rollDiff) || wetForcingAwareness) {
-        const defenderAwarenessForDiff = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+        const defenderAwarenessForDiff =
+          defender.awareness +
+          getMexicoDefendingAwarenessBonus(newState.track) -
+          (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
         const { difference } = calculateEffectiveAwarenessDifference(
           attacker.awareness,
           defenderAwarenessForDiff
@@ -1082,7 +1086,10 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
 
         // Forced Awareness on retry, regardless of roll difference.
         const retryRollDiff = Math.abs(retryAttackerTotal - retryDefenderTotal);
-        const retryDefenderAwareness = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+        const retryDefenderAwareness =
+          defender.awareness +
+          getMexicoDefendingAwarenessBonus(newState.track) -
+          (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
         const { difference: retryDiff } = calculateEffectiveAwarenessDifference(
           attacker.awareness,
           retryDefenderAwareness
@@ -1250,7 +1257,10 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         const triggerAwarenessFailed =
           shouldTriggerAwarenessCheck(rollDiff) || (attackerHasDragFocus && rollDiff >= 8) || wetForcingAwareness;
         if (triggerAwarenessFailed) {
-          const failDefenderAwareness = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+          const failDefenderAwareness =
+            defender.awareness +
+            getMexicoDefendingAwarenessBonus(newState.track) -
+            (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
           const { difference: failDiff } = calculateEffectiveAwarenessDifference(
             attacker.awareness,
             failDefenderAwareness

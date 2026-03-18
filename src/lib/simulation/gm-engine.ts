@@ -35,6 +35,8 @@ import {
   statToModifier,
   getModifiedDriverStat,
   getMonacoRacecraftBonus,
+  getMexicoOvertakeRacecraftBonus,
+  getMexicoDefendingAwarenessBonus,
 } from './track-compatibility';
 import type { DriverRaceState, RaceState } from './race-engine';
 import { initializeRace, appendLiveRaceEvent } from './race-engine';
@@ -281,10 +283,10 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
         });
       }
 
-      // Monaco Double Stack: if both drivers of a team pit on the same lap,
+      // Team double stack: if both drivers of a team pit on the same lap,
       // the car that was behind on track takes an additional pit position loss.
-      const monacoDoubleStackDrivers = new Set<string>();
-      if (race.track.name === 'Monaco' && race.currentLap < race.totalLaps) {
+      const doubleStackDrivers = new Set<string>();
+      if ((race.track.name === 'Monaco' || race.track.name === 'Mexico') && race.currentLap < race.totalLaps) {
         const byTeam: Record<string, { driverId: string; position: number }[]> = {};
         race.standings.forEach(s => {
           if (s.isDNF) return;
@@ -300,7 +302,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           if (list.length < 2) return;
           list.sort((a, b) => a.position - b.position);
           const behind = list[list.length - 1];
-          monacoDoubleStackDrivers.add(behind.driverId);
+          doubleStackDrivers.add(behind.driverId);
         });
       }
       // Pit position loss: Red Flag = 0 (free); Safety Car = track.pitLossSafetyCar; else track.pitLossNormal
@@ -346,13 +348,17 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           s.pitCount++;
           s.hasPitted = true;
           let positionsLost = getPitPositionLossForFlag();
-          // Apply Monaco double-stack penalty to the trailing car in a team double stop.
-          if (race.track.name === 'Monaco' && monacoDoubleStackDrivers.has(s.driverId) && race.track.pitLossDoubleStack > 0) {
-            positionsLost += race.track.pitLossDoubleStack;
+          // Apply double-stack penalty to the trailing car in a team double stop.
+          if ((race.track.name === 'Monaco' || race.track.name === 'Mexico') && doubleStackDrivers.has(s.driverId) && race.track.pitLossDoubleStack > 0) {
+            const doubleStackLoss =
+              race.raceFlag === 'safetyCar'
+                ? (race.track.pitLossDoubleStackSafetyCar ?? race.track.pitLossDoubleStack)
+                : race.track.pitLossDoubleStack;
+            positionsLost += doubleStackLoss;
             race.eventLog.push({
               lap: race.currentLap,
               type: 'pit_stop',
-              description: `${driver.name}: Double Stack penalty (additional ${race.track.pitLossDoubleStack} positions lost at Monaco)`,
+              description: `${driver.name}: Double Stack penalty (additional ${doubleStackLoss} positions lost at ${race.track.name})`,
             });
           }
           applyPositionLoss(race, s.driverId, positionsLost);
@@ -694,7 +700,10 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           });
         }
 
-        const defenderAwarenessForDiffFS = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+        const defenderAwarenessForDiffFS =
+          defender.awareness +
+          getMexicoDefendingAwarenessBonus(race.track) -
+          (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
         const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiffFS);
         const category = determineAwarenessOutcomeCategory(difference);
         if (category !== 'clean') {
@@ -1001,9 +1010,10 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
   const dPaceMod = getModifiedDriverStat(defender, 'pace', carD, race.track);
   let dRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, race.track);
 
-  // Monaco Track Trait — "Watch your Step"
+  // Monaco / Mexico contested-roll track bonuses.
   aRacecraftMod += getMonacoRacecraftBonus(race.track, attacker, defender);
   dRacecraftMod += getMonacoRacecraftBonus(race.track, defender, attacker);
+  aRacecraftMod += getMexicoOvertakeRacecraftBonus(race.track);
   const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track, race.weather);
   const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track, race.weather);
   const aPaceWithTyre = aPaceMod + aTyreMods.paceDelta;
@@ -1273,7 +1283,10 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       wetWeather &&
       (attackerRoll <= attackerThreshold || defenderRoll <= defenderThreshold);
     if (shouldTriggerAwarenessCheck(rollDiff) || wetForcingAwareness) {
-      const defenderAwarenessForDiff = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+      const defenderAwarenessForDiff =
+        defender.awareness +
+        getMexicoDefendingAwarenessBonus(race.track) -
+        (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
       const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiff);
       const category = determineAwarenessOutcomeCategory(difference);
       if (category !== 'clean') {
@@ -1365,7 +1378,10 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
     const triggerAwarenessFailed =
       shouldTriggerAwarenessCheck(rollDiff) || (attackerHasDragFocus && rollDiff >= 8) || wetForcingAwareness;
     if (triggerAwarenessFailed) {
-      const defenderAwarenessForDiff = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+      const defenderAwarenessForDiff =
+        defender.awareness +
+        getMexicoDefendingAwarenessBonus(race.track) -
+        (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
       const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiff);
       const category = determineAwarenessOutcomeCategory(difference);
       if (category !== 'clean') {
@@ -1424,11 +1440,12 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
   const dPaceMod = getModifiedDriverStat(defender, 'pace', carD, race.track);
   let dRacecraftMod = getModifiedDriverStat(defender, 'racecraft', carD, race.track);
 
-  // Monaco Track Trait — "Watch your Step"
+  // Monaco / Mexico contested-roll track bonuses.
   aRacecraftMod += getMonacoRacecraftBonus(race.track, attacker, defender);
   dRacecraftMod += getMonacoRacecraftBonus(race.track, defender, attacker);
-  const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track);
-  const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track);
+  aRacecraftMod += getMexicoOvertakeRacecraftBonus(race.track);
+  const aTyreMods = getTyrePhase1Modifiers(aState.tyreState, race.track, race.weather);
+  const dTyreMods = getTyrePhase1Modifiers(dState.tyreState, race.track, race.weather);
   const aPaceWithTyre = aPaceMod + aTyreMods.paceDelta;
   const dPaceWithTyre = dPaceMod + dTyreMods.paceDelta;
 
@@ -1645,7 +1662,10 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
 
   // Forced awareness on retry: prompt for d6 in GM mode (no createDiceResult here)
   const rollDiff = Math.abs(aTotal - dTotal);
-  const defenderAwarenessForDiffRel = defender.awareness - (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
+  const defenderAwarenessForDiffRel =
+    defender.awareness +
+    getMexicoDefendingAwarenessBonus(race.track) -
+    (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
   const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiffRel);
   const category = determineAwarenessOutcomeCategory(difference);
 

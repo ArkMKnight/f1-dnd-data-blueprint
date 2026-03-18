@@ -185,6 +185,68 @@ export const TRACKS: Track[] = [
     weather: 'sunny',
     tyreStatusBands: DEFAULT_TYRE_STATUS_BANDS,
   },
+  {
+    id: 'tr5', name: 'Mexico', lapCount: 71,
+    primaryCarStat: 'mediumSpeedCornering', secondaryCarStat: 'topSpeed',
+    momentumLossPositions: 1,
+    pitLoss: 6,
+    pitLossNormal: 6, pitLossSafetyCar: 3, pitLossFrontWing: 1, pitLossDoubleStack: 3, pitLossDoubleStackSafetyCar: 1,
+    tyreDegradation: {
+      soft: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 17, hiddenMaxLimit: 19, absoluteEndLap: 24 },
+      medium: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 28, hiddenMaxLimit: 34, absoluteEndLap: 37 },
+      hard: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 40, hiddenMaxLimit: 47, absoluteEndLap: 51 },
+      intermediate: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 38, hiddenMaxLimit: 42, absoluteEndLap: 49 },
+      wet: { effectiveLapRangeStart: 1, effectiveLapRangeEnd: 52, hiddenMaxLimit: 52, absoluteEndLap: 61 },
+    },
+    deterministicTraits: [
+      {
+        id: 'mexico_thin_air',
+        name: 'Thin Air',
+        description: 'Pace bonuses are capped at +4.',
+        type: 'deterministic',
+        triggerCondition: 'always',
+        targetDriverStat: 'pace',
+        racePhase: null,
+      },
+      {
+        id: 'mexico_high_altitude',
+        name: 'High Altitude',
+        description: 'Drivers with 8+ Adaptability gain +1 Racecraft; otherwise they get -1 Racecraft.',
+        type: 'deterministic',
+        triggerCondition: 'always',
+        targetDriverStat: 'racecraft',
+        racePhase: null,
+      },
+      {
+        id: 'mexico_late_braking_specialist',
+        name: 'Late Braking Specialist',
+        description: '+1 Racecraft when overtaking. +1 Awareness when defending.',
+        type: 'conditional',
+        triggerCondition: 'overtake/defend checks',
+        targetDriverStat: 'racecraft',
+        racePhase: null,
+      },
+    ],
+    conditionalTraits: [
+      {
+        id: 'mexico_altitude_specialist',
+        name: 'Altitude Specialist',
+        description: 'At 200+ Car Match Score, drivers with 10+ Adaptability ignore Thin Air.',
+        type: 'conditional',
+        triggerCondition: '200+ Car Match Score',
+        targetDriverStat: 'adaptability',
+        racePhase: null,
+      },
+    ],
+    weather: 'sunny',
+    tyreStatusBands: {
+      soft: { freshUntilLap: 17, baseUntilLap: 19, wornUntilLap: 23, deadFromLap: 24 },
+      medium: { freshUntilLap: 28, baseUntilLap: 34, wornUntilLap: 36, deadFromLap: 37 },
+      hard: { freshUntilLap: 40, baseUntilLap: 47, wornUntilLap: 50, deadFromLap: 51 },
+      intermediate: { freshUntilLap: 38, baseUntilLap: 42, wornUntilLap: 48, deadFromLap: 49 },
+      wet: { freshUntilLap: 52, baseUntilLap: 52, wornUntilLap: 60, deadFromLap: 61 },
+    },
+  },
 ];
 
 export const getTrack = (id: string) => TRACKS.find(t => t.id === id);

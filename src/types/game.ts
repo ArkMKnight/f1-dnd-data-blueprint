@@ -145,6 +145,7 @@ export interface Track {
   pitLossSafetyCar: number;        // Reduced positions lost under SC
   pitLossFrontWing: number;        // Additional loss for front wing repair
   pitLossDoubleStack: number;      // Additional loss for second car in double stack
+  pitLossDoubleStackSafetyCar?: number; // Additional loss for second car in double stack under SC
   // Tyre Degradation Parameters (per compound)
   tyreDegradation: TyreDegradationConfig;
   deterministicTraits: Trait[];

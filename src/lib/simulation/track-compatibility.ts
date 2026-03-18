@@ -68,6 +68,7 @@ export const getModifiedDriverStat = (
 ): number => {
   const rawStat = driver[statName];
   const isMonaco = track.name === 'Monaco';
+  const isMexico = track.name === 'Mexico';
   const baseMod =
     statName === 'pace'
       ? (isMonaco ? racecraftModifierFromStat(rawStat) : paceModifierFromStat(rawStat))
@@ -80,7 +81,22 @@ export const getModifiedDriverStat = (
   }
 
   const compat = calculateTrackCompatibility(car, track, lookupTable);
-  return baseMod + compat.modifier;
+  let modified = baseMod + compat.modifier;
+
+  if (isMexico && statName === 'racecraft') {
+    modified += driver.adaptability >= 8 ? 1 : -1;
+  }
+
+  if (isMexico && statName === 'pace') {
+    const matchScore = getTrackMatchScore(car, track);
+    const ignoreThinAir =
+      driver.adaptability >= 10 && getTrackBonusTiers(matchScore).trackSpecificBonusEligible;
+    if (!ignoreThinAir) {
+      modified = Math.min(modified, 4);
+    }
+  }
+
+  return modified;
 };
 
 // Get track match score for a car at a track
@@ -116,4 +132,12 @@ export const getMonacoRacecraftBonus = (
   const selfDiff = (driver.racecraft ?? 0) - (driver.pace ?? 0);
   const oppDiff = (opponent.racecraft ?? 0) - (opponent.pace ?? 0);
   return selfDiff > oppDiff ? 1 : 0;
+};
+
+export const getMexicoOvertakeRacecraftBonus = (track: Track): number => {
+  return track.name === 'Mexico' ? 1 : 0;
+};
+
+export const getMexicoDefendingAwarenessBonus = (track: Track): number => {
+  return track.name === 'Mexico' ? 1 : 0;
 };
