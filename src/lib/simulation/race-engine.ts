@@ -34,6 +34,7 @@ import {
   MAJOR_DAMAGE_ROLL_MODIFIER,
   FRONT_WING_DAMAGE_ROLL,
   determineRaceFlag,
+  mapSingleDriverAwarenessToDifference,
 } from '@/types/game';
 import {
   statToModifier,
@@ -724,7 +725,10 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
 
       // Normal awareness check for a successful overtake
       const rollDiff = Math.abs(attackerTotal - defenderTotal);
-      const wetWeather = newState.weather === 'damp' || newState.weather === 'wet' || newState.weather === 'drenched';
+      const wetWeather =
+        newState.weather === 'damp' ||
+        newState.weather === 'wet' ||
+        newState.weather === 'drenched';
       const attackerBaseThreshold = 10 - Math.floor(attacker.adaptability / 2);
       const defenderBaseThreshold = 10 - Math.floor(defender.adaptability / 2);
       const attackerOnDry =
@@ -737,9 +741,14 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         defenderState.tyreState.compound === 'hard';
       const attackerThreshold = attackerOnDry ? attackerBaseThreshold * 2 : attackerBaseThreshold;
       const defenderThreshold = defenderOnDry ? defenderBaseThreshold * 2 : defenderBaseThreshold;
-      const wetForcingAwareness =
-        wetWeather &&
-        (aRoll.result.roll <= attackerThreshold || dRoll.result.roll <= defenderThreshold);
+
+      // Wet Adaptability rule:
+      // If a driver rolls below this threshold in wet/damp/drenched conditions,
+      // they trigger an Awareness check based on their own Awareness band
+      // (no attacker/defender comparison).
+      const attackerFailedWetThreshold = wetWeather && aRoll.result.roll <= attackerThreshold;
+      const defenderFailedWetThreshold = wetWeather && dRoll.result.roll <= defenderThreshold;
+      const wetForcingAwareness = attackerFailedWetThreshold || defenderFailedWetThreshold;
       if (shouldTriggerAwarenessCheck(rollDiff) || wetForcingAwareness) {
         const defenderAwarenessForDiff =
           defender.awareness +
@@ -755,7 +764,23 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
           effectiveDiff = difference + mod;
         }
-        const category = determineAwarenessOutcomeCategory(effectiveDiff);
+
+        // For wet-forced checks, base the category on the single-driver Awareness band
+        // rather than the attacker/defender difference, so low-Awareness drivers always
+        // enter the 3-6 or 7+ tables as intended.
+        const failingDriverForCategory =
+          wetForcingAwareness &&
+          (attackerFailedWetThreshold !== defenderFailedWetThreshold)
+            ? attackerFailedWetThreshold
+              ? attacker
+              : defender
+            : null;
+
+        const diffForCategory = failingDriverForCategory
+          ? mapSingleDriverAwarenessToDifference(failingDriverForCategory.awareness)
+          : effectiveDiff;
+
+        const category = determineAwarenessOutcomeCategory(diffForCategory);
 
         const defenderHasPreservation = (defender.traitId ?? defender.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
         const attackerHasPreservation = (attacker.traitId ?? attacker.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
@@ -794,33 +819,131 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               description: `${attacker.name} Preservation Instinct — awareness aborted; overtake fails, ${defender.name} keeps position.`,
             });
           }
-        } else if (category !== 'clean') {
-          let d6 = createDiceResult('awareness', 'd6', 6);
-          let rawOutcome = resolveAwarenessD6Outcome(effectiveDiff, d6.roll);
-          const { hasEvasion } = checkEvasionPriority(attacker.awareness, defender.awareness);
-          let finalOutcome = applyEvasionDowngrade(rawOutcome, hasEvasion);
-          if (teams && teams.length > 0) {
-            const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
-            const defenderTeam = teams.find(t => t.id === defender.teamId)!;
-            const traitAdjusted = applyAwarenessOutcomeTraits({
-              track: newState.track,
-              attacker,
-              defender,
-              attackerTeam,
-              defenderTeam,
-              awarenessDifference: effectiveDiff,
-              baseOutcome: finalOutcome,
-            });
-            finalOutcome = traitAdjusted.outcome;
-          }
+        } else if (category !== 'clean' || wetForcingAwareness) {
+          if (wetForcingAwareness) {
+            const flexMod =
+              traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
+            const aDiff = mapSingleDriverAwarenessToDifference(attacker.awareness);
+            const dDiff = mapSingleDriverAwarenessToDifference(defender.awareness + flexMod);
 
-          const rsState = traitRuntime?.teamTraits[defender.teamId];
-          const canReactiveSuspension = defenderTeamRef && (defenderTeamRef.traitId ?? defenderTeamRef.trait) === 'reactive_suspension' && (rsState?.usesRemaining ?? 0) > 0;
-          if (canReactiveSuspension && finalOutcome !== 'cleanRacing') {
-            rsState!.usesRemaining = Math.max(0, (rsState!.usesRemaining ?? 1) - 1);
-            d6 = createDiceResult('awareness', 'd6', 6);
-            rawOutcome = resolveAwarenessD6Outcome(effectiveDiff, d6.roll);
-            finalOutcome = applyEvasionDowngrade(rawOutcome, hasEvasion);
+            let d6a = createDiceResult('awareness', 'd6', 6);
+            let d6d = createDiceResult('awareness', 'd6', 6);
+            let attOutcome = resolveAwarenessD6Outcome(aDiff, d6a.roll);
+            let defOutcome = resolveAwarenessD6Outcome(dDiff, d6d.roll);
+
+            if (teams && teams.length > 0) {
+              const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
+              const defenderTeam = teams.find(t => t.id === defender.teamId)!;
+              attOutcome = applyAwarenessOutcomeTraits({
+                track: newState.track,
+                attacker: defender,
+                defender: attacker,
+                attackerTeam: defenderTeam,
+                defenderTeam: attackerTeam,
+                awarenessDifference: aDiff,
+                baseOutcome: attOutcome,
+              }).outcome;
+              defOutcome = applyAwarenessOutcomeTraits({
+                track: newState.track,
+                attacker,
+                defender,
+                attackerTeam,
+                defenderTeam,
+                awarenessDifference: dDiff,
+                baseOutcome: defOutcome,
+              }).outcome;
+            }
+
+            const rsStateW = traitRuntime?.teamTraits[defender.teamId];
+            const canRSW =
+              defenderTeamRef &&
+              (defenderTeamRef.traitId ?? defenderTeamRef.trait) === 'reactive_suspension' &&
+              (rsStateW?.usesRemaining ?? 0) > 0;
+            if (canRSW && defOutcome !== 'cleanRacing') {
+              rsStateW!.usesRemaining = Math.max(0, (rsStateW!.usesRemaining ?? 1) - 1);
+              d6d = createDiceResult('awareness', 'd6', 6);
+              defOutcome = resolveAwarenessD6Outcome(dDiff, d6d.roll);
+              if (teams && teams.length > 0) {
+                const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
+                const defenderTeam = teams.find(t => t.id === defender.teamId)!;
+                defOutcome = applyAwarenessOutcomeTraits({
+                  track: newState.track,
+                  attacker,
+                  defender,
+                  attackerTeam,
+                  defenderTeam,
+                  awarenessDifference: dDiff,
+                  baseOutcome: defOutcome,
+                }).outcome;
+              }
+              newState.eventLog.push({
+                lap,
+                type: 'trait',
+                description: `${defender.name}'s team used Reactive Suspension — rerolled d6(${d6d.roll}).`,
+              });
+            }
+
+            newState.eventLog.push({
+              lap,
+              type: 'awareness',
+              description: `Awareness (wet, independent; roll diff ${rollDiff}): ${attacker.name} d6(${d6a.roll}) → ${attOutcome}; ${defender.name} d6(${d6d.roll}) → ${defOutcome}`,
+            });
+
+            const logIncident = (name: string, id: string, o: AwarenessOutcome) => {
+              if (o === 'cleanRacing') return;
+              appendLiveRaceEvent(newState, {
+                lapNumber: lap,
+                type: 'incident',
+                description: `${name} awareness incident (${o})`,
+                primaryDriverId: id,
+                secondaryDriverId: id === attacker.id ? defender.id : attacker.id,
+              });
+            };
+            logIncident(attacker.name, attacker.id, attOutcome);
+            logIncident(defender.name, defender.id, defOutcome);
+
+            const applyAwarenessDamage = (row: typeof attackerState, o: AwarenessOutcome) => {
+              if (!requiresDamageHandoff(o)) return;
+              const damageType = mapAwarenessOutcomeToDamageState(o);
+              const prev = row.damageState.state;
+              row.damageState = {
+                ...row.damageState,
+                state: escalateDamage(row.damageState.state as any, damageType),
+              };
+              if (damageType === 'dnf') row.isDNF = true;
+              const drv = newState.drivers.find(d => d.id === row.driverId)!;
+              newState.eventLog.push({
+                lap,
+                type: 'damage',
+                description: `${drv.name}: ${prev} → ${row.damageState.state}`,
+              });
+            };
+            applyAwarenessDamage(attackerState, attOutcome);
+            applyAwarenessDamage(defenderState, defOutcome);
+
+            const maxPosW = standings.filter(s => !s.isDNF).length;
+            const lossW = newState.track.momentumLossPositions;
+            if (attOutcome === 'momentumLoss') {
+              attackerState.position = Math.min(attackerState.position + lossW, maxPosW);
+              newState.eventLog.push({
+                lap,
+                type: 'momentum_loss',
+                description: `${attacker.name} loses ${lossW} position(s) from Momentum Loss.`,
+              });
+            }
+            if (defOutcome === 'momentumLoss') {
+              defenderState.position = Math.min(defenderState.position + lossW, maxPosW);
+              newState.eventLog.push({
+                lap,
+                type: 'momentum_loss',
+                description: `${defender.name} loses ${lossW} position(s) from Momentum Loss.`,
+              });
+            }
+          } else {
+            let d6 = createDiceResult('awareness', 'd6', 6);
+            let rawOutcome = resolveAwarenessD6Outcome(effectiveDiff, d6.roll);
+            const { hasEvasion } = checkEvasionPriority(attacker.awareness, defender.awareness);
+            let finalOutcome = applyEvasionDowngrade(rawOutcome, hasEvasion);
             if (teams && teams.length > 0) {
               const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
               const defenderTeam = teams.find(t => t.id === defender.teamId)!;
@@ -835,59 +958,89 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               });
               finalOutcome = traitAdjusted.outcome;
             }
-            newState.eventLog.push({ lap, type: 'trait', description: `${defender.name}'s team used Reactive Suspension — rerolled d6(${d6.roll}).` });
-          }
 
-          newState.eventLog.push({
-            lap,
-            type: 'awareness',
-            description: `Awareness check (diff ${rollDiff}): d6(${d6.roll}) → ${finalOutcome}${
-              hasEvasion ? ' (evasion applied)' : ''
-            }`,
-          });
-
-          if (finalOutcome !== 'cleanRacing') {
-            appendLiveRaceEvent(newState, {
-              lapNumber: lap,
-              type: 'incident',
-              description: `${defender.name} awareness incident (${finalOutcome})`,
-              primaryDriverId: defender.id,
-              secondaryDriverId: attacker.id,
-            });
-          }
-
-          if (requiresDamageHandoff(finalOutcome)) {
-            const damageType = mapAwarenessOutcomeToDamageState(finalOutcome);
-            const prevDef = defenderState.damageState.state;
-            const prevAtt = attackerState.damageState.state;
-            defenderState.damageState = {
-              ...defenderState.damageState,
-              state: escalateDamage(defenderState.damageState.state as any, damageType),
-            };
-            attackerState.damageState = {
-              ...attackerState.damageState,
-              state: escalateDamage(attackerState.damageState.state as any, damageType),
-            };
-            if (damageType === 'dnf') {
-              defenderState.isDNF = true;
-              attackerState.isDNF = true;
+            const rsState = traitRuntime?.teamTraits[defender.teamId];
+            const canReactiveSuspension =
+              defenderTeamRef &&
+              (defenderTeamRef.traitId ?? defenderTeamRef.trait) === 'reactive_suspension' &&
+              (rsState?.usesRemaining ?? 0) > 0;
+            if (canReactiveSuspension && finalOutcome !== 'cleanRacing') {
+              rsState!.usesRemaining = Math.max(0, (rsState!.usesRemaining ?? 1) - 1);
+              d6 = createDiceResult('awareness', 'd6', 6);
+              rawOutcome = resolveAwarenessD6Outcome(effectiveDiff, d6.roll);
+              finalOutcome = applyEvasionDowngrade(rawOutcome, hasEvasion);
+              if (teams && teams.length > 0) {
+                const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
+                const defenderTeam = teams.find(t => t.id === defender.teamId)!;
+                const traitAdjusted = applyAwarenessOutcomeTraits({
+                  track: newState.track,
+                  attacker,
+                  defender,
+                  attackerTeam,
+                  defenderTeam,
+                  awarenessDifference: effectiveDiff,
+                  baseOutcome: finalOutcome,
+                });
+                finalOutcome = traitAdjusted.outcome;
+              }
+              newState.eventLog.push({
+                lap,
+                type: 'trait',
+                description: `${defender.name}'s team used Reactive Suspension — rerolled d6(${d6.roll}).`,
+              });
             }
-            newState.eventLog.push({
-              lap,
-              type: 'damage',
-              description: `${defender.name}: ${prevDef} → ${defenderState.damageState.state}; ${attacker.name}: ${prevAtt} → ${attackerState.damageState.state}`,
-            });
-          }
 
-          if (finalOutcome === 'momentumLoss') {
-            const maxPos = standings.filter(s => !s.isDNF).length;
-            defenderState.position = Math.min(defenderState.position + newState.track.momentumLossPositions, maxPos);
-            attackerState.position = Math.min(attackerState.position + newState.track.momentumLossPositions, maxPos);
             newState.eventLog.push({
               lap,
-              type: 'momentum_loss',
-              description: `Both lose ${newState.track.momentumLossPositions} position(s): ${defender.name}, ${attacker.name}`,
+              type: 'awareness',
+              description: `Awareness check (diff ${rollDiff}): d6(${d6.roll}) → ${finalOutcome}${
+                hasEvasion ? ' (evasion applied)' : ''
+              }`,
             });
+
+            if (finalOutcome !== 'cleanRacing') {
+              appendLiveRaceEvent(newState, {
+                lapNumber: lap,
+                type: 'incident',
+                description: `${defender.name} awareness incident (${finalOutcome})`,
+                primaryDriverId: defender.id,
+                secondaryDriverId: attacker.id,
+              });
+            }
+
+            if (requiresDamageHandoff(finalOutcome)) {
+              const damageType = mapAwarenessOutcomeToDamageState(finalOutcome);
+              const prevDef = defenderState.damageState.state;
+              const prevAtt = attackerState.damageState.state;
+              defenderState.damageState = {
+                ...defenderState.damageState,
+                state: escalateDamage(defenderState.damageState.state as any, damageType),
+              };
+              attackerState.damageState = {
+                ...attackerState.damageState,
+                state: escalateDamage(attackerState.damageState.state as any, damageType),
+              };
+              if (damageType === 'dnf') {
+                defenderState.isDNF = true;
+                attackerState.isDNF = true;
+              }
+              newState.eventLog.push({
+                lap,
+                type: 'damage',
+                description: `${defender.name}: ${prevDef} → ${defenderState.damageState.state}; ${attacker.name}: ${prevAtt} → ${attackerState.damageState.state}`,
+              });
+            }
+
+            if (finalOutcome === 'momentumLoss') {
+              const maxPos = standings.filter(s => !s.isDNF).length;
+              defenderState.position = Math.min(defenderState.position + newState.track.momentumLossPositions, maxPos);
+              attackerState.position = Math.min(attackerState.position + newState.track.momentumLossPositions, maxPos);
+              newState.eventLog.push({
+                lap,
+                type: 'momentum_loss',
+                description: `Both lose ${newState.track.momentumLossPositions} position(s): ${defender.name}, ${attacker.name}`,
+              });
+            }
           }
         } else {
           newState.eventLog.push({
@@ -1297,12 +1450,13 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           defenderState.tyreState.compound === 'hard';
         const attackerThreshold = attackerOnDry ? attackerBaseThreshold * 2 : attackerBaseThreshold;
         const defenderThreshold = defenderOnDry ? defenderBaseThreshold * 2 : defenderBaseThreshold;
-        const wetForcingAwareness =
-          wetWeather &&
-          (aRoll.result.roll <= attackerThreshold || dRoll.result.roll <= defenderThreshold);
+        const failAttackerFailedWet = wetWeather && aRoll.result.roll <= attackerThreshold;
+        const failDefenderFailedWet = wetWeather && dRoll.result.roll <= defenderThreshold;
+        const wetForcingAwareness = failAttackerFailedWet || failDefenderFailedWet;
         const triggerAwarenessFailed =
           shouldTriggerAwarenessCheck(rollDiff) || (attackerHasDragFocus && rollDiff >= 8) || wetForcingAwareness;
         if (triggerAwarenessFailed) {
+          const failDefenderTeamRefEarly = teams?.find(t => t.id === defender.teamId);
           const failDefenderAwareness =
             defender.awareness +
             getMexicoDefendingAwarenessBonus(newState.track) -
@@ -1347,33 +1501,131 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
                 description: `${attacker.name} Preservation Instinct — awareness aborted; overtake fails, ${defender.name} keeps position.`,
               });
             }
-          } else if (failCategory !== 'clean') {
-            let failD6 = createDiceResult('awareness', 'd6', 6);
-            let failRawOutcome = resolveAwarenessD6Outcome(failEffectiveDiff, failD6.roll);
-            const failHasEvasion = checkEvasionPriority(attacker.awareness, defender.awareness);
-            let failFinalOutcome = applyEvasionDowngrade(failRawOutcome, failHasEvasion.hasEvasion);
-            if (teams && teams.length > 0) {
-              const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
-              const defenderTeam = teams.find(t => t.id === defender.teamId)!;
-              const traitAdjusted = applyAwarenessOutcomeTraits({
-                track: newState.track,
-                attacker,
-                defender,
-                attackerTeam,
-                defenderTeam,
-                awarenessDifference: failEffectiveDiff,
-                baseOutcome: failFinalOutcome,
+          } else if (failCategory !== 'clean' || wetForcingAwareness) {
+            if (wetForcingAwareness) {
+              const flexModF =
+                traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
+              const aDiffF = mapSingleDriverAwarenessToDifference(attacker.awareness);
+              const dDiffF = mapSingleDriverAwarenessToDifference(defender.awareness + flexModF);
+
+              let d6af = createDiceResult('awareness', 'd6', 6);
+              let d6df = createDiceResult('awareness', 'd6', 6);
+              let attOutF = resolveAwarenessD6Outcome(aDiffF, d6af.roll);
+              let defOutF = resolveAwarenessD6Outcome(dDiffF, d6df.roll);
+
+              if (teams && teams.length > 0) {
+                const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
+                const defenderTeam = teams.find(t => t.id === defender.teamId)!;
+                attOutF = applyAwarenessOutcomeTraits({
+                  track: newState.track,
+                  attacker: defender,
+                  defender: attacker,
+                  attackerTeam: defenderTeam,
+                  defenderTeam: attackerTeam,
+                  awarenessDifference: aDiffF,
+                  baseOutcome: attOutF,
+                }).outcome;
+                defOutF = applyAwarenessOutcomeTraits({
+                  track: newState.track,
+                  attacker,
+                  defender,
+                  attackerTeam,
+                  defenderTeam,
+                  awarenessDifference: dDiffF,
+                  baseOutcome: defOutF,
+                }).outcome;
+              }
+
+              const failRSW = traitRuntime?.teamTraits[defender.teamId];
+              const failCanRSW =
+                failDefenderTeamRefEarly &&
+                (failDefenderTeamRefEarly.traitId ?? failDefenderTeamRefEarly.trait) === 'reactive_suspension' &&
+                (failRSW?.usesRemaining ?? 0) > 0;
+              if (failCanRSW && defOutF !== 'cleanRacing') {
+                failRSW!.usesRemaining = Math.max(0, (failRSW!.usesRemaining ?? 1) - 1);
+                d6df = createDiceResult('awareness', 'd6', 6);
+                defOutF = resolveAwarenessD6Outcome(dDiffF, d6df.roll);
+                if (teams && teams.length > 0) {
+                  const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
+                  const defenderTeam = teams.find(t => t.id === defender.teamId)!;
+                  defOutF = applyAwarenessOutcomeTraits({
+                    track: newState.track,
+                    attacker,
+                    defender,
+                    attackerTeam,
+                    defenderTeam,
+                    awarenessDifference: dDiffF,
+                    baseOutcome: defOutF,
+                  }).outcome;
+                }
+                newState.eventLog.push({
+                  lap,
+                  type: 'trait',
+                  description: `${defender.name}'s team used Reactive Suspension — rerolled d6(${d6df.roll}).`,
+                });
+              }
+
+              newState.eventLog.push({
+                lap,
+                type: 'awareness',
+                description: `Awareness (wet, independent; roll diff ${rollDiff}): ${attacker.name} d6(${d6af.roll}) → ${attOutF}; ${defender.name} d6(${d6df.roll}) → ${defOutF}`,
               });
-              failFinalOutcome = traitAdjusted.outcome;
-            }
-            const failDefenderTeamRef = teams?.find(t => t.id === defender.teamId);
-            const failRS = traitRuntime?.teamTraits[defender.teamId];
-            const failCanRS = (failDefenderTeamRef?.traitId ?? failDefenderTeamRef?.trait) === 'reactive_suspension' && (failRS?.usesRemaining ?? 0) > 0;
-            if (failCanRS && failFinalOutcome !== 'cleanRacing') {
-              failRS!.usesRemaining = Math.max(0, (failRS!.usesRemaining ?? 1) - 1);
-              failD6 = createDiceResult('awareness', 'd6', 6);
-              failRawOutcome = resolveAwarenessD6Outcome(failEffectiveDiff, failD6.roll);
-              failFinalOutcome = applyEvasionDowngrade(failRawOutcome, failHasEvasion.hasEvasion);
+
+              const logIncF = (name: string, id: string, o: AwarenessOutcome) => {
+                if (o === 'cleanRacing') return;
+                appendLiveRaceEvent(newState, {
+                  lapNumber: lap,
+                  type: 'incident',
+                  description: `${name} awareness incident (${o})`,
+                  primaryDriverId: id,
+                  secondaryDriverId: id === attacker.id ? defender.id : attacker.id,
+                });
+              };
+              logIncF(attacker.name, attacker.id, attOutF);
+              logIncF(defender.name, defender.id, defOutF);
+
+              const applyDmgF = (row: typeof attackerState, o: AwarenessOutcome) => {
+                if (!requiresDamageHandoff(o)) return;
+                const damageType = mapAwarenessOutcomeToDamageState(o);
+                const prev = row.damageState.state;
+                row.damageState = {
+                  ...row.damageState,
+                  state: escalateDamage(row.damageState.state as any, damageType),
+                };
+                if (damageType === 'dnf') row.isDNF = true;
+                const drv = newState.drivers.find(d => d.id === row.driverId)!;
+                newState.eventLog.push({
+                  lap,
+                  type: 'damage',
+                  description: `${drv.name}: ${prev} → ${row.damageState.state}`,
+                });
+              };
+              applyDmgF(attackerState, attOutF);
+              applyDmgF(defenderState, defOutF);
+
+              const maxPosF = standings.filter(s => !s.isDNF).length;
+              const lossF = newState.track.momentumLossPositions;
+              if (attOutF === 'momentumLoss') {
+                attackerState.position = Math.min(attackerState.position + lossF, maxPosF);
+                newState.eventLog.push({
+                  lap,
+                  type: 'momentum_loss',
+                  description: `${attacker.name} loses ${lossF} position(s) from Momentum Loss.`,
+                });
+              }
+              if (defOutF === 'momentumLoss') {
+                defenderState.position = Math.min(defenderState.position + lossF, maxPosF);
+                newState.eventLog.push({
+                  lap,
+                  type: 'momentum_loss',
+                  description: `${defender.name} loses ${lossF} position(s) from Momentum Loss.`,
+                });
+              }
+            } else {
+              let failD6 = createDiceResult('awareness', 'd6', 6);
+              let failRawOutcome = resolveAwarenessD6Outcome(failEffectiveDiff, failD6.roll);
+              const failHasEvasion = checkEvasionPriority(attacker.awareness, defender.awareness);
+              let failFinalOutcome = applyEvasionDowngrade(failRawOutcome, failHasEvasion.hasEvasion);
               if (teams && teams.length > 0) {
                 const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
                 const defenderTeam = teams.find(t => t.id === defender.teamId)!;
@@ -1388,45 +1640,85 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
                 });
                 failFinalOutcome = traitAdjusted.outcome;
               }
-              newState.eventLog.push({ lap, type: 'trait', description: `${defender.name}'s team used Reactive Suspension.` });
-            }
-
-            newState.eventLog.push({
-              lap,
-              type: 'awareness',
-              description: `Awareness check (diff ${rollDiff}): d6(${failD6.roll}) → ${failFinalOutcome}${failHasEvasion.hasEvasion ? ' (evasion applied)' : ''}`,
-            });
-
-            if (failFinalOutcome !== 'cleanRacing') {
-              appendLiveRaceEvent(newState, {
-                lapNumber: lap,
-                type: 'incident',
-                description: `${defender.name} awareness incident (${failFinalOutcome})`,
-                primaryDriverId: defender.id,
-                secondaryDriverId: attacker.id,
-              });
-            }
-            if (requiresDamageHandoff(failFinalOutcome)) {
-              const damageType = mapAwarenessOutcomeToDamageState(failFinalOutcome);
-              const prevDef = defenderState.damageState.state;
-              const prevAtt = attackerState.damageState.state;
-              defenderState.damageState = { ...defenderState.damageState, state: escalateDamage(defenderState.damageState.state as any, damageType) };
-              attackerState.damageState = { ...attackerState.damageState, state: escalateDamage(attackerState.damageState.state as any, damageType) };
-              if (damageType === 'dnf') {
-                defenderState.isDNF = true;
-                attackerState.isDNF = true;
+              const failRS = traitRuntime?.teamTraits[defender.teamId];
+              const failCanRS =
+                (failDefenderTeamRefEarly?.traitId ?? failDefenderTeamRefEarly?.trait) === 'reactive_suspension' &&
+                (failRS?.usesRemaining ?? 0) > 0;
+              if (failCanRS && failFinalOutcome !== 'cleanRacing') {
+                failRS!.usesRemaining = Math.max(0, (failRS!.usesRemaining ?? 1) - 1);
+                failD6 = createDiceResult('awareness', 'd6', 6);
+                failRawOutcome = resolveAwarenessD6Outcome(failEffectiveDiff, failD6.roll);
+                failFinalOutcome = applyEvasionDowngrade(failRawOutcome, failHasEvasion.hasEvasion);
+                if (teams && teams.length > 0) {
+                  const attackerTeam = teams.find(t => t.id === attacker.teamId)!;
+                  const defenderTeam = teams.find(t => t.id === defender.teamId)!;
+                  const traitAdjusted = applyAwarenessOutcomeTraits({
+                    track: newState.track,
+                    attacker,
+                    defender,
+                    attackerTeam,
+                    defenderTeam,
+                    awarenessDifference: failEffectiveDiff,
+                    baseOutcome: failFinalOutcome,
+                  });
+                  failFinalOutcome = traitAdjusted.outcome;
+                }
+                newState.eventLog.push({ lap, type: 'trait', description: `${defender.name}'s team used Reactive Suspension.` });
               }
-              newState.eventLog.push({ lap, type: 'damage', description: `${defender.name}: ${prevDef} → ${defenderState.damageState.state}; ${attacker.name}: ${prevAtt} → ${attackerState.damageState.state}` });
-            }
-            if (failFinalOutcome === 'momentumLoss') {
-              const maxPos = standings.filter(s => !s.isDNF).length;
-              defenderState.position = Math.min(defenderState.position + newState.track.momentumLossPositions, maxPos);
-              attackerState.position = Math.min(attackerState.position + newState.track.momentumLossPositions, maxPos);
+
               newState.eventLog.push({
                 lap,
-                type: 'momentum_loss',
-                description: `Both lose ${newState.track.momentumLossPositions} position(s): ${defender.name}, ${attacker.name}`,
+                type: 'awareness',
+                description: `Awareness check (diff ${rollDiff}): d6(${failD6.roll}) → ${failFinalOutcome}${failHasEvasion.hasEvasion ? ' (evasion applied)' : ''}`,
               });
+
+              if (failFinalOutcome !== 'cleanRacing') {
+                appendLiveRaceEvent(newState, {
+                  lapNumber: lap,
+                  type: 'incident',
+                  description: `${defender.name} awareness incident (${failFinalOutcome})`,
+                  primaryDriverId: defender.id,
+                  secondaryDriverId: attacker.id,
+                });
+              }
+              if (requiresDamageHandoff(failFinalOutcome)) {
+                const damageType = mapAwarenessOutcomeToDamageState(failFinalOutcome);
+                const prevDef = defenderState.damageState.state;
+                const prevAtt = attackerState.damageState.state;
+                defenderState.damageState = {
+                  ...defenderState.damageState,
+                  state: escalateDamage(defenderState.damageState.state as any, damageType),
+                };
+                attackerState.damageState = {
+                  ...attackerState.damageState,
+                  state: escalateDamage(attackerState.damageState.state as any, damageType),
+                };
+                if (damageType === 'dnf') {
+                  defenderState.isDNF = true;
+                  attackerState.isDNF = true;
+                }
+                newState.eventLog.push({
+                  lap,
+                  type: 'damage',
+                  description: `${defender.name}: ${prevDef} → ${defenderState.damageState.state}; ${attacker.name}: ${prevAtt} → ${attackerState.damageState.state}`,
+                });
+              }
+              if (failFinalOutcome === 'momentumLoss') {
+                const maxPos = standings.filter(s => !s.isDNF).length;
+                defenderState.position = Math.min(
+                  defenderState.position + newState.track.momentumLossPositions,
+                  maxPos
+                );
+                attackerState.position = Math.min(
+                  attackerState.position + newState.track.momentumLossPositions,
+                  maxPos
+                );
+                newState.eventLog.push({
+                  lap,
+                  type: 'momentum_loss',
+                  description: `Both lose ${newState.track.momentumLossPositions} position(s): ${defender.name}, ${attacker.name}`,
+                });
+              }
             }
           } else {
             newState.eventLog.push({

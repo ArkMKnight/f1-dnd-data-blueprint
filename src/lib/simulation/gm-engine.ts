@@ -30,6 +30,7 @@ import {
   MAJOR_DAMAGE_ROLL_MODIFIER,
   resolveIntentDeclaration,
   determineRaceFlag,
+  mapSingleDriverAwarenessToDifference,
 } from '@/types/game';
 import {
   statToModifier,
@@ -776,6 +777,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
               defenderId,
               defenderTeamId,
               awarenessDiff: tctx?.awarenessDiff,
+              wetIndependentAwareness: tctx?.wetIndependentAwareness,
               waitingFor: 'defender',
               attackerRoll,
               rsConsumed: true,
@@ -795,6 +797,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
               attackerId,
               defenderId,
               awarenessDiff: tctx?.awarenessDiff,
+              wetIndependentAwareness: tctx?.wetIndependentAwareness,
               attackerRoll,
               defenderRoll: originalDefenderRoll,
               rsConsumed: true,
@@ -1286,7 +1289,10 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
 
     // Normal awareness check for successful overtake
     const rollDiff = Math.abs(aTotal - dTotal);
-    const wetWeather = race.weather === 'damp' || race.weather === 'wet' || race.weather === 'drenched';
+    const wetWeather =
+      race.weather === 'damp' ||
+      race.weather === 'wet' ||
+      race.weather === 'drenched';
     const attackerBaseThreshold = 10 - Math.floor(attacker.adaptability / 2);
     const defenderBaseThreshold = 10 - Math.floor(defender.adaptability / 2);
     const attackerOnDry =
@@ -1299,17 +1305,37 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       dState.tyreState.compound === 'hard';
     const attackerThreshold = attackerOnDry ? attackerBaseThreshold * 2 : attackerBaseThreshold;
     const defenderThreshold = defenderOnDry ? defenderBaseThreshold * 2 : defenderBaseThreshold;
-    const wetForcingAwareness =
-      wetWeather &&
-      (attackerRoll <= attackerThreshold || defenderRoll <= defenderThreshold);
+
+    // Wet Adaptability rule (GM tabletop):
+    // If a driver rolls below this threshold in wet/damp/drenched conditions,
+    // they trigger an Awareness check based on their own Awareness band
+    // (no attacker/defender comparison).
+    const attackerFailedWetThreshold = wetWeather && attackerRoll <= attackerThreshold;
+    const defenderFailedWetThreshold = wetWeather && defenderRoll <= defenderThreshold;
+    const wetForcingAwareness = attackerFailedWetThreshold || defenderFailedWetThreshold;
     if (shouldTriggerAwarenessCheck(rollDiff) || wetForcingAwareness) {
       const defenderAwarenessForDiff =
         defender.awareness +
         getMexicoDefendingAwarenessBonus(race.track) -
         (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
       const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiff);
-      const category = determineAwarenessOutcomeCategory(difference);
-      if (category !== 'clean') {
+
+      // For wet-forced checks, treat this as a single-driver Awareness band check
+      // when deciding which risk band we are in.
+      const failingDriverForCategory =
+        wetForcingAwareness &&
+        (attackerFailedWetThreshold !== defenderFailedWetThreshold)
+          ? attackerFailedWetThreshold
+            ? attacker
+            : defender
+          : null;
+
+      const effectiveAwarenessDiffForCategory = failingDriverForCategory
+        ? mapSingleDriverAwarenessToDifference(failingDriverForCategory.awareness)
+        : difference;
+
+      const category = determineAwarenessOutcomeCategory(effectiveAwarenessDiffForCategory);
+      if (category !== 'clean' || wetForcingAwareness) {
         const defenderHasPreservation = (defender.traitId ?? defender.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
         const attackerHasPreservation = (attacker.traitId ?? attacker.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
         if (defenderHasPreservation) {
@@ -1323,7 +1349,9 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
           state.currentPhase = 'awareness_roll';
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: `Awareness check triggered (roll diff ${rollDiff}, awareness diff ${difference}). Roll d6 for ${attacker.name} (attacker):`,
+            description: wetForcingAwareness
+              ? `Awareness: wet Adaptability (dry tyres) — independent checks (roll diff ${rollDiff}). ${attacker.name} Awareness ${attacker.awareness}; ${defender.name} Awareness ${defender.awareness}. Roll d6 for ${attacker.name}:`
+              : `Awareness check triggered (roll diff ${rollDiff}, awareness diff ${difference}). Roll d6 for ${attacker.name} (attacker):`,
             needsInput: true,
             inputType: 'roll',
             diceSize: 6,
@@ -1331,12 +1359,13 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
               attackerId: attacker.id,
               defenderId: defender.id,
               awarenessDiff: difference,
+              wetIndependentAwareness: wetForcingAwareness,
               waitingFor: 'attacker',
             },
           };
           return state;
         }
-      } else {
+      } else if (!wetForcingAwareness) {
         race.eventLog.push({ lap: race.currentLap, type: 'awareness', description: 'Awareness: Clean racing' });
       }
     }
@@ -1392,9 +1421,9 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       dState.tyreState.compound === 'hard';
     const attackerThreshold = attackerOnDry ? attackerBaseThreshold * 2 : attackerBaseThreshold;
     const defenderThreshold = defenderOnDry ? defenderBaseThreshold * 2 : defenderBaseThreshold;
-    const wetForcingAwareness =
-      wetWeather &&
-      (attackerRoll <= attackerThreshold || defenderRoll <= defenderThreshold);
+    const attackerFailedWetThreshold = wetWeather && attackerRoll <= attackerThreshold;
+    const defenderFailedWetThreshold = wetWeather && defenderRoll <= defenderThreshold;
+    const wetForcingAwareness = attackerFailedWetThreshold || defenderFailedWetThreshold;
     const triggerAwarenessFailed =
       shouldTriggerAwarenessCheck(rollDiff) || (attackerHasDragFocus && rollDiff >= 8) || wetForcingAwareness;
     if (triggerAwarenessFailed) {
@@ -1403,8 +1432,23 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
         getMexicoDefendingAwarenessBonus(race.track) -
         (((defender.traitId ?? defender.trait) === 'hotlap_master' && TRAITS_BY_ID['hotlap_master']?.isEnabled) ? 1 : 0);
       const { difference } = calculateEffectiveAwarenessDifference(attacker.awareness, defenderAwarenessForDiff);
-      const category = determineAwarenessOutcomeCategory(difference);
-      if (category !== 'clean') {
+
+      // For wet-forced checks, treat this as a single-driver Awareness band check
+      // when deciding which risk band we are in.
+      const failingDriverForCategory =
+        wetForcingAwareness &&
+        (attackerFailedWetThreshold !== defenderFailedWetThreshold)
+          ? attackerFailedWetThreshold
+            ? attacker
+            : defender
+          : null;
+
+      const effectiveAwarenessDiffForCategory = failingDriverForCategory
+        ? mapSingleDriverAwarenessToDifference(failingDriverForCategory.awareness)
+        : difference;
+
+      const category = determineAwarenessOutcomeCategory(effectiveAwarenessDiffForCategory);
+      if (category !== 'clean' || wetForcingAwareness) {
         const defenderHasPreservation = (defender.traitId ?? defender.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
         const attackerHasPreservation = (attacker.traitId ?? attacker.trait) === 'preservation_instinct' && TRAITS_BY_ID['preservation_instinct']?.isEnabled;
         if (defenderHasPreservation) {
@@ -1425,15 +1469,22 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
           state.currentPhase = 'awareness_roll';
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: `Awareness check triggered (roll diff ${rollDiff}, awareness diff ${difference}). Roll d6:`,
+            description: wetForcingAwareness
+              ? `Awareness: wet Adaptability (dry tyres) — independent checks (roll diff ${rollDiff}). ${attacker.name} Awareness ${attacker.awareness}; ${defender.name} Awareness ${defender.awareness}. Roll d6 for ${attacker.name}:`
+              : `Awareness check triggered (roll diff ${rollDiff}, awareness diff ${difference}). Roll d6:`,
             needsInput: true,
             inputType: 'roll',
             diceSize: 6,
-            context: { attackerId: attacker.id, defenderId: defender.id, awarenessDiff: difference },
+            context: {
+              attackerId: attacker.id,
+              defenderId: defender.id,
+              awarenessDiff: difference,
+              wetIndependentAwareness: wetForcingAwareness,
+            },
           };
           return state;
         }
-      } else {
+      } else if (!wetForcingAwareness) {
         race.eventLog.push({ lap: race.currentLap, type: 'awareness', description: 'Awareness: Clean racing' });
       }
     }
@@ -1778,9 +1829,18 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   const defenderMod = (ctx?.awarenessDefenderModifier as number) ?? 0;
   const persistentAwarenessMod =
     (state.traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0);
-  const effectiveDiff = awarenessDiff + defenderMod + persistentAwarenessMod;
+  const effectiveDiffShared = awarenessDiff + defenderMod + persistentAwarenessMod;
+  const wetIndependentAwareness = (ctx?.wetIndependentAwareness as boolean | undefined) ?? false;
+
   const attacker = race.drivers.find(d => d.id === attackerId)!;
   const defender = race.drivers.find(d => d.id === defenderId)!;
+  const attackerDiffD6 = wetIndependentAwareness
+    ? mapSingleDriverAwarenessToDifference(attacker.awareness)
+    : effectiveDiffShared;
+  const defenderDiffD6 = wetIndependentAwareness
+    ? mapSingleDriverAwarenessToDifference(defender.awareness + persistentAwarenessMod)
+    : effectiveDiffShared;
+
   const attackerTeam = state.teams.find(t => t.id === attacker.teamId)!;
   const defenderTeam = state.teams.find(t => t.id === defender.teamId)!;
 
@@ -1800,13 +1860,15 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   // Base outcomes from each driver's own d6 (unless forced DNF above)
   let attackerOutcome: AwarenessOutcome = attackerForcedDNF
     ? 'dnf'
-    : resolveAwarenessD6Outcome(effectiveDiff, attackerRoll);
+    : resolveAwarenessD6Outcome(attackerDiffD6, attackerRoll);
   let defenderOutcome: AwarenessOutcome = defenderForcedDNF
     ? 'dnf'
-    : resolveAwarenessD6Outcome(effectiveDiff, defenderRoll);
+    : resolveAwarenessD6Outcome(defenderDiffD6, defenderRoll);
 
-  // Evasion priority applies only to the higher-awareness driver.
-  const { hasEvasion, evasionDriverId } = checkEvasionPriority(attacker.awareness, defender.awareness);
+  // Evasion priority compares drivers; wet dry-tyre checks are independent per driver.
+  const { hasEvasion, evasionDriverId } = wetIndependentAwareness
+    ? { hasEvasion: false, evasionDriverId: null }
+    : checkEvasionPriority(attacker.awareness, defender.awareness);
   if (hasEvasion) {
     if (evasionDriverId === 'attacker') {
       attackerOutcome = applyEvasionDowngrade(attackerOutcome, true);
@@ -1823,7 +1885,7 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
       defender: attacker,          // the driver whose traits we care about
       attackerTeam: defenderTeam,
       defenderTeam: attackerTeam,
-      awarenessDifference: effectiveDiff,
+      awarenessDifference: attackerDiffD6,
       baseOutcome: attackerOutcome,
     });
     attackerOutcome = attackerTraitAdjusted.outcome;
@@ -1836,7 +1898,7 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
       defender,
       attackerTeam,
       defenderTeam,
-      awarenessDifference: effectiveDiff,
+      awarenessDifference: defenderDiffD6,
       baseOutcome: defenderOutcome,
     });
     defenderOutcome = defenderTraitAdjusted.outcome;
@@ -1845,7 +1907,9 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   race.eventLog.push({
     lap: race.currentLap,
     type: 'awareness',
-    description: `Awareness: attacker d6(${attackerRoll}) → ${attackerOutcome}, defender d6(${defenderRoll}) → ${defenderOutcome}${hasEvasion ? ' (evasion applied to higher Awareness driver)' : ''}`,
+    description: `Awareness: attacker d6(${attackerRoll}) → ${attackerOutcome}, defender d6(${defenderRoll}) → ${defenderOutcome}${
+      wetIndependentAwareness ? ' (wet: independent bands per driver)' : ''
+    }${hasEvasion ? ' (evasion applied to higher Awareness driver)' : ''}`,
   });
 
   const aState = race.standings.find(s => s.driverId === attackerId)!;
@@ -1979,11 +2043,11 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
           description: `${attacker.name} rolled Position Swap while ${defender.name} had Momentum Loss — ${attacker.name} drops one extra position.`,
         });
       } else if (dHasDamage) {
-        // Other has damage → damage applied, no swap.
+        swapPositions(aState, dState);
         race.eventLog.push({
           lap: race.currentLap,
           type: 'awareness',
-          description: `${attacker.name} rolled Position Swap but ${defender.name} took damage — no position swap applied.`,
+          description: `${attacker.name} rolled Position Swap; ${defender.name} took damage — position swap still applied.`,
         });
       } else {
         // Clean or non-positional outcome for the other driver → full swap.
@@ -1998,10 +2062,11 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
           description: `${defender.name} rolled Position Swap while ${attacker.name} had Momentum Loss — ${defender.name} drops one extra position.`,
         });
       } else if (aHasDamage) {
+        swapPositions(aState, dState);
         race.eventLog.push({
           lap: race.currentLap,
           type: 'awareness',
-          description: `${defender.name} rolled Position Swap but ${attacker.name} took damage — no position swap applied.`,
+          description: `${defender.name} rolled Position Swap; ${attacker.name} took damage — position swap still applied.`,
         });
       } else {
         swapPositions(aState, dState);

@@ -313,6 +313,18 @@ export const LOW_AWARENESS_THRESHOLD = 10 as const;
 export const LOW_AWARENESS_FORCED_DIFFERENCE_MIN = 3 as const;
 export const LOW_AWARENESS_FORCED_DIFFERENCE_MAX = 6 as const;
 
+// Single-driver Awareness bands for wet Adaptability rule:
+// - 0-6   Awareness → treated as difference ≥ 7 (most dangerous band)
+// - 7-13  Awareness → treated as difference 3-6 (middle band)
+// - 14-20 Awareness → treated as difference ≤ 2 (clean band)
+export const mapSingleDriverAwarenessToDifference = (
+  awareness: number
+): number => {
+  if (awareness <= 6) return 7;
+  if (awareness <= 13) return 3;
+  return 2;
+};
+
 // Evasion Priority: If Awareness difference ≥ 5, higher Awareness driver gets evasion
 export const EVASION_PRIORITY_THRESHOLD = 5 as const;
 
