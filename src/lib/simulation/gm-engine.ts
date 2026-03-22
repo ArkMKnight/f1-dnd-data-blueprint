@@ -391,6 +391,11 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
 
       // Under Safety Car: no overtakes; show two actions only
       if (race.raceFlag === 'safetyCar') {
+        // Match non-SC pit_decision: first opportunity of the lap is index 1 (lap_start resets to 0).
+        // Without this, resume_green → generateOpportunityPrompt showed "Opportunity 0 of 2".
+        if (state.currentOpportunityIndex === 0) {
+          state.currentOpportunityIndex = 1;
+        }
         state.currentPhase = 'safety_car_action';
         state.pendingPrompt = {
           phase: 'safety_car_action',
@@ -426,6 +431,9 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
       });
       state.currentPhase = 'opportunity_roll';
       state.pendingPrompt = null;
+      if (state.currentOpportunityIndex < 1) {
+        state.currentOpportunityIndex = 1;
+      }
       return generateOpportunityPrompt(state);
     }
 
