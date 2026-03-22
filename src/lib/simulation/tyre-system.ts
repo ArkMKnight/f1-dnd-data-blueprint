@@ -220,9 +220,10 @@ export const getTyrePhase1Modifiers = (
     if (tyre.compound === 'intermediate' || tyre.compound === 'wet') {
       paceDelta -= 3;
     }
-  } else if (weather === 'damp' || weather === 'wet') {
+  } else if (weather === 'wetSpots' || weather === 'damp' || weather === 'wet') {
     if (isDryTyre) {
-      // In wet conditions, dry tyres have a flat -3 modifier (ignores base/status value)
+      // In wet-leaning conditions, dry tyres have a flat -3 modifier
+      // (ignores base/status value).
       paceDelta = -3;
     }
     if (weather === 'wet') {

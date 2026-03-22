@@ -229,6 +229,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
         ones[entry.driverId] = count;
         if (count >= 2) {
           s.isDNF = true;
+          normalizeStandingsWithDNFsLast(race);
           race.eventLog.push({
             lap: currentLapNum,
             type: 'damage',
@@ -948,7 +949,8 @@ const applyPositionLoss = (race: RaceState, driverId: string, positionsLost: num
     .sort((a, b) => a.position - b.position);
   const dnf: DriverRaceState[] = race.standings
     .filter(s => s.isDNF)
-    .sort((a, b) => a.position - b.position);
+    // Preserve previously "further back" DNFs ahead of newly created DNFs.
+    .sort((a, b) => b.position - a.position);
 
   const fromIndex = active.findIndex(s => s.driverId === driverId);
   if (fromIndex === -1) return;
@@ -956,6 +958,24 @@ const applyPositionLoss = (race: RaceState, driverId: string, positionsLost: num
   const [driverState] = active.splice(fromIndex, 1);
   const targetIndex = Math.min(fromIndex + positionsLost, active.length);
   active.splice(targetIndex, 0, driverState);
+
+  active.forEach((s, i) => {
+    s.position = i + 1;
+  });
+  dnf.forEach((s, i) => {
+    s.position = active.length + i + 1;
+  });
+
+  race.standings = [...active, ...dnf];
+};
+
+const normalizeStandingsWithDNFsLast = (race: RaceState): void => {
+  const active: DriverRaceState[] = race.standings
+    .filter(s => !s.isDNF)
+    .sort((a, b) => a.position - b.position);
+  const dnf: DriverRaceState[] = race.standings
+    .filter(s => s.isDNF)
+    .sort((a, b) => b.position - a.position);
 
   active.forEach((s, i) => {
     s.position = i + 1;
@@ -2073,6 +2093,9 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
       }
     }
   }
+
+  // Guarantee newly created DNFs are immediately classified at the back.
+  normalizeStandingsWithDNFsLast(race);
 
   return moveToNextOpportunityOrEnd(state);
 };

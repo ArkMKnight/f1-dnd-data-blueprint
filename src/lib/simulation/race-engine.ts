@@ -210,6 +210,7 @@ export const initializeRace = (
   return base;
 };
 
+/** Live feed is capped; older overtakes/incidents drop off. XP uses full `eventLog` mirrors instead. */
 const MAX_LIVE_EVENTS = 50;
 
 export const appendLiveRaceEvent = (
@@ -226,6 +227,43 @@ export const appendLiveRaceEvent = (
   };
   const next = [...baseEvents, nextEvent];
   state.liveEvents = next.length > MAX_LIVE_EVENTS ? next.slice(-MAX_LIVE_EVENTS) : next;
+
+  // Mirror XP-relevant events into eventLog (never trimmed) so Race XP can use the full log.
+  const lap = payload.lapNumber;
+  if (payload.type === 'overtake' && payload.primaryDriverId && payload.secondaryDriverId) {
+    state.eventLog.push({
+      lap,
+      type: 'overtake',
+      description: payload.description,
+      details: {
+        primaryDriverId: payload.primaryDriverId,
+        secondaryDriverId: payload.secondaryDriverId,
+      },
+    });
+  } else if (payload.type === 'defense' && payload.primaryDriverId && payload.secondaryDriverId) {
+    state.eventLog.push({
+      lap,
+      type: 'defense',
+      description: payload.description,
+      details: {
+        primaryDriverId: payload.primaryDriverId,
+        secondaryDriverId: payload.secondaryDriverId,
+      },
+    });
+  } else if (payload.type === 'incident') {
+    const desc = payload.description.toLowerCase();
+    if (desc.includes('awareness incident')) {
+      state.eventLog.push({
+        lap,
+        type: 'race_incident',
+        description: payload.description,
+        details: {
+          primaryDriverId: payload.primaryDriverId,
+          secondaryDriverId: payload.secondaryDriverId,
+        },
+      });
+    }
+  }
 };
 
 // ============================================
@@ -1820,7 +1858,11 @@ const normalizePositions = (standings: DriverRaceState[]): DriverRaceState[] => 
     .sort((a, b) => a.position - b.position);
   active.forEach((s, i) => { s.position = i + 1; });
 
-  const dnf = standings.filter(s => s.isDNF);
+  // Keep previously classified backmarkers ahead of newly created DNFs.
+  // Higher prior position means "already further back", so it should stay ahead.
+  const dnf = standings
+    .filter(s => s.isDNF)
+    .sort((a, b) => b.position - a.position);
   dnf.forEach((s, i) => { s.position = active.length + i + 1; });
 
   return [...active, ...dnf];

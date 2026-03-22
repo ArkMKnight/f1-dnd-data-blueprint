@@ -96,12 +96,45 @@ const createEmptyXp = (): DriverXpSummary => ({
   qualifying: 0,
 });
 
-const computeRaceXp = (
+/** Parse legacy `contested_roll` lines when overtake/defense were not mirrored to eventLog. */
+const parseContestedRollOutcome = (
+  description: string,
+  drivers: Driver[]
+): { attackerId: string; defenderId: string; outcome: 'overtake' | 'defended' } | null => {
+  const outcome = description.includes('→ OVERTAKE')
+    ? 'overtake'
+    : description.includes('→ DEFENDED')
+      ? 'defended'
+      : null;
+  if (!outcome) return null;
+  const vsIdx = description.indexOf(' vs ');
+  if (vsIdx === -1) return null;
+  const left = description.slice(0, vsIdx).trim();
+  const right = description.slice(vsIdx + 4).trim();
+  const attackerName = left.split(':')[0]?.trim();
+  const defenderName = right.split(':')[0]?.trim();
+  if (!attackerName || !defenderName) return null;
+  const attacker = drivers.find(d => d.name === attackerName);
+  const defender = drivers.find(d => d.name === defenderName);
+  if (!attacker || !defender) return null;
+  return { attackerId: attacker.id, defenderId: defender.id, outcome };
+};
+
+/** Last pit in wet — driver name appears before ` pits` in standard log lines. */
+const parsePitDriverIdFromDescription = (description: string, drivers: Driver[]): string | null => {
+  const lower = description.toLowerCase();
+  const idx = lower.indexOf(' pits');
+  if (idx === -1) return null;
+  const name = description.slice(0, idx).trim();
+  return drivers.find(d => d.name === name)?.id ?? null;
+};
+
+export const computeRaceXp = (
   gmState: GMState,
   startingPositions: Record<string, number>
 ): Record<string, DriverXpSummary> => {
   const race = gmState.raceState;
-  const { drivers, cars, standings, liveEvents = [] } = race;
+  const { drivers, cars, standings, eventLog = [] } = race;
 
   const xpByDriver: Record<string, DriverXpSummary> = {};
   const getXp = (driverId: string): DriverXpSummary => {
@@ -151,37 +184,59 @@ const computeRaceXp = (
     });
   }
 
-  liveEvents.forEach(e => {
-    if (e.type === 'overtake') {
-      const attackerId = e.primaryDriverId;
-      const defenderId = e.secondaryDriverId;
-      if (attackerId && defenderId) {
-        // Pace: successful overtake
-        getXp(attackerId).pace += 1;
-        // Racecraft: failed defense
-        getXp(defenderId).racecraft -= 1;
-        // Adaptability contests in wet
-        if (wetOrMixed) {
-          getXp(attackerId).adaptability += 1;
-          getXp(defenderId).adaptability -= 1;
-        }
+  // Pace / Racecraft / wet Adaptability from full event log (not trimmed live feed).
+  const applyOvertakeDefense = (
+    attackerId: string,
+    defenderId: string,
+    kind: 'overtake' | 'defended'
+  ): void => {
+    if (kind === 'overtake') {
+      getXp(attackerId).pace += 1;
+      getXp(defenderId).racecraft -= 1;
+      if (wetOrMixed) {
+        getXp(attackerId).adaptability += 1;
+        getXp(defenderId).adaptability -= 1;
       }
-    } else if (e.type === 'defense') {
-      const defenderId = e.primaryDriverId;
-      const attackerId = e.secondaryDriverId;
-      if (attackerId && defenderId) {
-        // Pace: failed overtake
-        getXp(attackerId).pace -= 1;
-        // Racecraft: successful defense
-        getXp(defenderId).racecraft += 1;
-        // Adaptability contests in wet
-        if (wetOrMixed) {
-          getXp(defenderId).adaptability += 1;
-          getXp(attackerId).adaptability -= 1;
-        }
+    } else {
+      getXp(attackerId).pace -= 1;
+      getXp(defenderId).racecraft += 1;
+      if (wetOrMixed) {
+        getXp(defenderId).adaptability += 1;
+        getXp(attackerId).adaptability -= 1;
       }
     }
-  });
+  };
+
+  const hasMirroredContest = eventLog.some(
+    e =>
+      (e.type === 'overtake' || e.type === 'defense') &&
+      e.details &&
+      typeof (e.details as { primaryDriverId?: string }).primaryDriverId === 'string' &&
+      typeof (e.details as { secondaryDriverId?: string }).secondaryDriverId === 'string'
+  );
+
+  if (hasMirroredContest) {
+    eventLog.forEach(ev => {
+      const d = ev.details as { primaryDriverId?: string; secondaryDriverId?: string } | undefined;
+      if (ev.type === 'overtake' && d?.primaryDriverId && d?.secondaryDriverId) {
+        applyOvertakeDefense(d.primaryDriverId, d.secondaryDriverId, 'overtake');
+      } else if (ev.type === 'defense' && d?.primaryDriverId && d?.secondaryDriverId) {
+        applyOvertakeDefense(d.secondaryDriverId, d.primaryDriverId, 'defended');
+      }
+    });
+  } else {
+    // Legacy sessions: only `contested_roll` lines (no mirrored overtake/defense rows).
+    eventLog.forEach(ev => {
+      if (ev.type !== 'contested_roll') return;
+      const parsed = parseContestedRollOutcome(ev.description, drivers);
+      if (!parsed) return;
+      if (parsed.outcome === 'overtake') {
+        applyOvertakeDefense(parsed.attackerId, parsed.defenderId, 'overtake');
+      } else {
+        applyOvertakeDefense(parsed.attackerId, parsed.defenderId, 'defended');
+      }
+    });
+  }
 
   // Position-based XP (Pace & Racecraft) and Awareness from final damage state
   const standingsByDriver: Record<string, typeof standings[number]> = {};
@@ -227,13 +282,16 @@ const computeRaceXp = (
     }
   });
 
-  // Awareness: avoid crash via Awareness (miracleEscape) and "no incidents"
-  liveEvents.forEach(e => {
+  // Awareness: miracleEscape (from full event log mirrors / race_incident rows)
+  eventLog.forEach(ev => {
+    const desc = ev.description.toLowerCase();
     if (
-      e.type === 'incident' &&
-      e.description.toLowerCase().includes('awareness incident (miracleescape')
+      ev.type === 'race_incident' &&
+      desc.includes('awareness incident') &&
+      desc.includes('miracleescape')
     ) {
-      getXp(e.primaryDriverId).awareness += 1;
+      const pid = (ev.details as { primaryDriverId?: string } | undefined)?.primaryDriverId;
+      if (pid) getXp(pid).awareness += 1;
     }
   });
 
@@ -242,30 +300,27 @@ const computeRaceXp = (
     const xp = getXp(driverId);
     const hasDamage =
       s.isDNF || s.damageState.state === 'minor' || s.damageState.state === 'major' || s.damageState.state === 'dnf';
-    const hasAwarenessIncident = liveEvents.some(
-      e =>
-        e.type === 'incident' &&
-        e.primaryDriverId === driverId &&
-        e.description.toLowerCase().includes('awareness incident')
-    );
+    const hasAwarenessIncident = eventLog.some(ev => {
+      const desc = ev.description.toLowerCase();
+      if (!desc.includes('awareness incident')) return false;
+      const fromDetails = (ev.details as { primaryDriverId?: string } | undefined)?.primaryDriverId;
+      if (fromDetails === driverId) return true;
+      const drv = drivers.find(d => d.id === driverId);
+      return drv ? desc.includes(drv.name.toLowerCase()) : false;
+    });
     if (!hasDamage && !hasAwarenessIncident) {
       // No incidents: only clean racing
       xp.awareness += 2;
     }
   });
 
-  // Adaptability: last to pit in wet race (approximation: last pit overall in wet/mixed race)
+  // Adaptability: last to pit in wet race (use pit_stop lines in full event log)
   if (wetOrMixed) {
-    const pitEvents = liveEvents.filter(
-      e => e.type === 'incident' && e.description.toLowerCase().startsWith('pit stop')
-    );
+    const pitEvents = eventLog.filter(e => e.type === 'pit_stop');
     if (pitEvents.length > 0) {
-      const lastPit = pitEvents.reduce((acc, ev) =>
-        ev.lapNumber > acc.lapNumber ? ev : acc
-      );
-      if (lastPit.primaryDriverId) {
-        getXp(lastPit.primaryDriverId).adaptability += 2;
-      }
+      const lastPit = pitEvents.reduce((acc, ev) => (ev.lap > acc.lap ? ev : acc));
+      const pid = parsePitDriverIdFromDescription(lastPit.description, drivers);
+      if (pid) getXp(pid).adaptability += 2;
     }
   }
 
@@ -1447,7 +1502,8 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
           </CardHeader>
           <CardContent className="space-y-2">
             <p className="text-xs text-muted-foreground">
-              XP is informational only and does not currently change driver stats.
+              XP is informational only and does not currently change driver stats. It is derived from the
+              full Event Log (not the trimmed Live Race Events feed).
             </p>
             {Object.keys(startingPositions).length === 0 && (
               <p className="text-xs text-destructive">

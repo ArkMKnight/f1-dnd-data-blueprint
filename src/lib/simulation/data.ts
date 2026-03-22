@@ -188,7 +188,7 @@ export const TRACKS: Track[] = [
   {
     id: 'tr5', name: 'Mexico', lapCount: 71,
     primaryCarStat: 'mediumSpeedCornering', secondaryCarStat: 'topSpeed',
-    momentumLossPositions: 1,
+    momentumLossPositions: 4,
     pitLoss: 6,
     pitLossNormal: 6, pitLossSafetyCar: 3, pitLossFrontWing: 1, pitLossDoubleStack: 3, pitLossDoubleStackSafetyCar: 1,
     tyreDegradation: {
