@@ -31,6 +31,12 @@ export type TyreCompound = 'soft' | 'medium' | 'hard' | 'intermediate' | 'wet';
 
 export type WeatherCondition = 'sunny' | 'wetSpots' | 'damp' | 'wet' | 'drenched';
 
+export interface WeatherSegment {
+  startLap: number; // inclusive
+  endLap: number; // inclusive
+  condition: WeatherCondition;
+}
+
 // Tyre status bands per track/compound:
 // - fresh: full compound modifier (Soft +2, Medium +1, Hard 0)
 // - base:  no modifier (0)
@@ -152,6 +158,10 @@ export interface Track {
   conditionalTraits: Trait[];
   // Optional per-race weather context; defaults to 'dry' when omitted.
   weather?: WeatherCondition;
+  // Optional chance of rain percentage for race setup/context.
+  chanceOfRain?: number;
+  // Optional scripted weather by lap range for scenario tracks.
+  weatherTimeline?: WeatherSegment[];
   // Tyre status bands per compound (fresh/base/worn/dead) for this track.
   tyreStatusBands: {
     soft: TyreStatusBands;

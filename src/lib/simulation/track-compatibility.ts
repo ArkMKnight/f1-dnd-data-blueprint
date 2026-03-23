@@ -87,15 +87,6 @@ export const getModifiedDriverStat = (
     modified += driver.adaptability >= 8 ? 1 : -1;
   }
 
-  if (isMexico && statName === 'pace') {
-    const matchScore = getTrackMatchScore(car, track);
-    const ignoreThinAir =
-      driver.adaptability >= 10 && getTrackBonusTiers(matchScore).trackSpecificBonusEligible;
-    if (!ignoreThinAir) {
-      modified = Math.min(modified, 4);
-    }
-  }
-
   return modified;
 };
 
