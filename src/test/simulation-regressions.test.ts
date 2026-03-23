@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { escalateDamage } from '@/types/game';
 import { TRACKS, INITIAL_DRIVERS, INITIAL_TEAMS, getCarsForDrivers } from '@/lib/simulation/data';
 import { initializeRace, simulateLap } from '@/lib/simulation/race-engine';
 import { initGMSession, advanceGMState } from '@/lib/simulation/gm-engine';
@@ -145,5 +146,151 @@ describe('simulation regressions', () => {
 
     expect(dryTyreInWetSpots.paceDelta).toBe(-3);
     expect(wetTyreInWet.paceDelta).toBe(-2);
+  });
+
+  it('retires a driver when additional damage is applied to major damage', () => {
+    expect(escalateDamage('major', 'minor')).toBe('dnf');
+    expect(escalateDamage('major', 'major')).toBe('dnf');
+  });
+
+  it('does not deploy Safety Car when a driver already had major damage before awareness', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS.slice(0, 3);
+    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    const cars = getCarsForDrivers(teams, drivers);
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
+
+    const attackerId = gm.raceState.standings[1].driverId;
+    const defenderId = gm.raceState.standings[0].driverId;
+    const attackerState = gm.raceState.standings.find(s => s.driverId === attackerId)!;
+
+    attackerState.damageState = {
+      ...attackerState.damageState,
+      state: 'major',
+    };
+
+    gm.currentPhase = 'awareness_roll';
+    gm.raceState.currentLap = 1;
+    gm.raceState.raceFlag = 'green';
+    gm.pendingPrompt = {
+      phase: 'awareness_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        attackerId,
+        defenderId,
+        awarenessDiff: 7,
+        waitingFor: 'defender',
+        attackerRoll: 4, // major damage on 7+ table
+      },
+    };
+
+    const next = advanceGMState(gm, 4);
+    expect(next.raceState.raceFlag).toBe('green');
+  });
+
+  it('deploys Safety Car when both drivers newly reach major damage on the same awareness check', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS.slice(0, 3);
+    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    const cars = getCarsForDrivers(teams, drivers);
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
+
+    const attackerId = gm.raceState.standings[1].driverId;
+    const defenderId = gm.raceState.standings[0].driverId;
+
+    gm.currentPhase = 'awareness_roll';
+    gm.raceState.currentLap = 1;
+    gm.raceState.raceFlag = 'green';
+    gm.pendingPrompt = {
+      phase: 'awareness_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        attackerId,
+        defenderId,
+        awarenessDiff: 7,
+        waitingFor: 'defender',
+        attackerRoll: 4, // major damage on 7+ table
+      },
+    };
+
+    const next = advanceGMState(gm, 4);
+    expect(next.raceState.raceFlag).toBe('safetyCar');
+  });
+
+  it('does not trigger Red Flag when a driver was already DNF before awareness', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS.slice(0, 3);
+    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    const cars = getCarsForDrivers(teams, drivers);
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
+
+    const attackerId = gm.raceState.standings[1].driverId;
+    const defenderId = gm.raceState.standings[0].driverId;
+    const attackerState = gm.raceState.standings.find(s => s.driverId === attackerId)!;
+
+    attackerState.damageState = {
+      ...attackerState.damageState,
+      state: 'dnf',
+    };
+    attackerState.isDNF = true;
+
+    gm.currentPhase = 'awareness_roll';
+    gm.raceState.currentLap = 1;
+    gm.raceState.raceFlag = 'green';
+    gm.pendingPrompt = {
+      phase: 'awareness_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        attackerId,
+        defenderId,
+        awarenessDiff: 7,
+        waitingFor: 'defender',
+        attackerRoll: 6, // dnf on 7+ table
+      },
+    };
+
+    const next = advanceGMState(gm, 6);
+    expect(next.raceState.raceFlag).toBe('green');
+  });
+
+  it('triggers Red Flag when both drivers newly DNF on the same awareness check', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS.slice(0, 3);
+    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    const cars = getCarsForDrivers(teams, drivers);
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
+
+    const attackerId = gm.raceState.standings[1].driverId;
+    const defenderId = gm.raceState.standings[0].driverId;
+
+    gm.currentPhase = 'awareness_roll';
+    gm.raceState.currentLap = 1;
+    gm.raceState.raceFlag = 'green';
+    gm.pendingPrompt = {
+      phase: 'awareness_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        attackerId,
+        defenderId,
+        awarenessDiff: 7,
+        waitingFor: 'defender',
+        attackerRoll: 6, // dnf on 7+ table
+      },
+    };
+
+    const next = advanceGMState(gm, 6);
+    expect(next.raceState.raceFlag).toBe('redFlag');
   });
 });

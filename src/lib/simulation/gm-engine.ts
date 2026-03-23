@@ -29,7 +29,6 @@ import {
   checkForcedPitCondition,
   MAJOR_DAMAGE_ROLL_MODIFIER,
   resolveIntentDeclaration,
-  determineRaceFlag,
   mapSingleDriverAwarenessToDifference,
 } from '@/types/game';
 import {
@@ -1942,6 +1941,8 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
 
   const aState = race.standings.find(s => s.driverId === attackerId)!;
   const dState = race.standings.find(s => s.driverId === defenderId)!;
+  const attackerDamageBeforeAwareness = aState.damageState.state;
+  const defenderDamageBeforeAwareness = dState.damageState.state;
 
   // Reactive Suspension safety rule: if this Awareness resolution was
   // reached via a reroll, only apply the new defender outcome if it is
@@ -1988,9 +1989,25 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   applyDamage(dState, defenderOutcome);
 
   // Safety Car / Red Flag from collision damage
+  // Only trigger flags when BOTH final states were produced by THIS awareness check,
+  // not when one/both cars were already in that state beforehand.
   const attackerDamage = aState.damageState.state;
   const defenderDamage = dState.damageState.state;
-  const flag = determineRaceFlag(attackerDamage, defenderDamage);
+  const bothFreshMajorFromThisCheck =
+    attackerDamage === 'major' &&
+    defenderDamage === 'major' &&
+    attackerDamageBeforeAwareness !== 'major' &&
+    defenderDamageBeforeAwareness !== 'major';
+  const bothFreshDnfFromThisCheck =
+    attackerDamage === 'dnf' &&
+    defenderDamage === 'dnf' &&
+    attackerDamageBeforeAwareness !== 'dnf' &&
+    defenderDamageBeforeAwareness !== 'dnf';
+  const flag = bothFreshDnfFromThisCheck
+    ? 'redFlag'
+    : bothFreshMajorFromThisCheck
+      ? 'safetyCar'
+      : 'green';
   if (flag === 'safetyCar') {
     race.raceFlag = 'safetyCar';
     race.eventLog.push({

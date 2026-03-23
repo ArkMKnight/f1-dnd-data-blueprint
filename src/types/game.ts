@@ -813,7 +813,7 @@ export const FRONT_WING_DAMAGE_ROLL = 1 as const;
 // - none + major = major
 // - minor + minor = major (escalation)
 // - minor + major = major
-// - major + minor = major (no change)
+// - major + minor = dnf (any further significant contact on major damage retires the car)
 // - major + major = dnf (escalation)
 // - any + dnf = dnf
 export const escalateDamage = (
@@ -824,8 +824,8 @@ export const escalateDamage = (
   if (current === 'none') return incoming;
   if (current === 'minor' && incoming === 'minor') return 'major';
   if (current === 'minor' && incoming === 'major') return 'major';
-  if (current === 'major' && incoming === 'major') return 'dnf';
-  return current; // major + minor = major (no change)
+  if (current === 'major' && (incoming === 'minor' || incoming === 'major')) return 'dnf';
+  return current;
 };
 
 // Damage application result
