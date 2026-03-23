@@ -758,48 +758,64 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
       }
 
       if (choiceType === 'reactive_suspension') {
-        const originalDefenderRoll = tctx?.defenderRoll as number;
-        const originalDefenderOutcome = tctx?.defenderOutcome as AwarenessOutcome;
+        const targetRole = (tctx?.targetRole as 'attacker' | 'defender' | undefined) ?? 'defender';
+        const targetDriverId = tctx?.targetDriverId as string;
+        const targetDriverName = tctx?.targetDriverName as string;
+        const targetTeamId = tctx?.targetTeamId as string;
+        const targetOriginalRoll = tctx?.targetOriginalRoll as number;
+        const targetOriginalOutcome = tctx?.targetOriginalOutcome as AwarenessOutcome;
         const attackerRoll = tctx?.attackerRoll as number;
+        const defenderRoll = tctx?.defenderRoll as number;
         const attackerId = tctx?.attackerId as string;
         const defenderId = tctx?.defenderId as string;
-        const defenderTeamId = tctx?.defenderTeamId as string;
-        const defenderName = tctx?.defenderName as string;
 
         if (choice === 'reactive_suspension_yes') {
-          consumeTraitActivation(state.traitRuntime, 'reactive_suspension', 'team', defenderTeamId);
+          consumeTraitActivation(state.traitRuntime, 'reactive_suspension', 'team', targetTeamId);
           race.eventLog.push({
             lap: race.currentLap,
             type: 'trait',
-            description: `Reactive Suspension used — original roll ${originalDefenderRoll} → ${originalDefenderOutcome}. Rerolling defender Awareness d6.`,
+            description: `Reactive Suspension used for ${targetDriverName} — original roll ${targetOriginalRoll} → ${targetOriginalOutcome}. Rerolling Awareness d6.`,
           });
           state.currentPhase = 'awareness_roll';
+          const waitingFor = targetRole;
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: `Reactive Suspension reroll for ${defenderName}: original d6=${originalDefenderRoll} → ${originalDefenderOutcome}. Roll new d6 for defender:`,
+            description: `Reactive Suspension reroll for ${targetDriverName}: original d6=${targetOriginalRoll} → ${targetOriginalOutcome}. Roll new d6 for ${targetRole}:`,
             needsInput: true,
             inputType: 'roll',
             diceSize: 6,
             context: {
               attackerId,
               defenderId,
-              defenderTeamId,
               awarenessDiff: tctx?.awarenessDiff,
               wetIndependentAwareness: tctx?.wetIndependentAwareness,
-              waitingFor: 'defender',
+              waitingFor,
               attackerRoll,
-              rsConsumed: true,
+              defenderRoll,
+              rsConsumedAttacker: (tctx?.rsConsumedAttacker as boolean | undefined) ?? false,
+              rsConsumedDefender: (tctx?.rsConsumedDefender as boolean | undefined) ?? false,
+              originalAttackerOutcome:
+                targetRole === 'attacker'
+                  ? targetOriginalOutcome
+                  : (tctx?.originalAttackerOutcome as AwarenessOutcome | undefined),
+              originalDefenderOutcome:
+                targetRole === 'defender'
+                  ? targetOriginalOutcome
+                  : (tctx?.originalDefenderOutcome as AwarenessOutcome | undefined),
+              ...(targetRole === 'attacker'
+                ? { rsConsumedAttacker: true }
+                : { rsConsumedDefender: true }),
             },
           };
           return state;
         }
 
         if (choice === 'reactive_suspension_no') {
-          // Proceed with original rolls and outcomes; mark RS as consumed to avoid re-offer.
+          // Proceed with original rolls and outcomes; mark this side as consumed to avoid re-offer.
           state.currentPhase = 'awareness_roll';
           state.pendingPrompt = {
             phase: 'awareness_roll',
-            description: `Reactive Suspension declined for ${defenderName}. Applying original Awareness outcomes.`,
+            description: `Reactive Suspension declined for ${targetDriverName}. Applying original Awareness outcomes.`,
             needsInput: false,
             context: {
               attackerId,
@@ -807,11 +823,15 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
               awarenessDiff: tctx?.awarenessDiff,
               wetIndependentAwareness: tctx?.wetIndependentAwareness,
               attackerRoll,
-              defenderRoll: originalDefenderRoll,
-              rsConsumed: true,
+              defenderRoll,
+              rsConsumedAttacker: (tctx?.rsConsumedAttacker as boolean | undefined) ?? false,
+              rsConsumedDefender: (tctx?.rsConsumedDefender as boolean | undefined) ?? false,
+              ...(targetRole === 'attacker'
+                ? { rsConsumedAttacker: true }
+                : { rsConsumedDefender: true }),
             },
           };
-          return resolveAwareness(state, attackerRoll, originalDefenderRoll);
+          return resolveAwareness(state, attackerRoll, defenderRoll);
         }
 
         return state;
@@ -1931,6 +1951,79 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
     defenderOutcome = defenderTraitAdjusted.outcome;
   }
 
+  // Offer Reactive Suspension before applying awareness effects.
+  // Either side may use it when their own outcome is not clean.
+  const rsConsumedAttacker = (ctx?.rsConsumedAttacker as boolean | undefined) ?? false;
+  const rsConsumedDefender = (ctx?.rsConsumedDefender as boolean | undefined) ?? false;
+  const attackerTeamTraitIdForRS = attackerTeam.traitId ?? attackerTeam.trait ?? null;
+  const defenderTeamTraitIdForRS = defenderTeam.traitId ?? defenderTeam.trait ?? null;
+  const attackerRsState = state.traitRuntime.teamTraits[attacker.teamId];
+  const defenderRsState = state.traitRuntime.teamTraits[defender.teamId];
+  const canOfferAttackerRS =
+    !rsConsumedAttacker &&
+    attackerTeamTraitIdForRS === 'reactive_suspension' &&
+    (attackerRsState?.usesRemaining ?? 0) > 0 &&
+    attackerOutcome !== 'cleanRacing';
+  const canOfferDefenderRS =
+    !rsConsumedDefender &&
+    defenderTeamTraitIdForRS === 'reactive_suspension' &&
+    (defenderRsState?.usesRemaining ?? 0) > 0 &&
+    defenderOutcome !== 'cleanRacing';
+
+  const rsTarget =
+    canOfferAttackerRS
+      ? {
+          role: 'attacker' as const,
+          driverId: attacker.id,
+          driverName: attacker.name,
+          teamId: attacker.teamId,
+          originalRoll: attackerRoll,
+          originalOutcome: attackerOutcome,
+        }
+      : canOfferDefenderRS
+        ? {
+            role: 'defender' as const,
+            driverId: defender.id,
+            driverName: defender.name,
+            teamId: defender.teamId,
+            originalRoll: defenderRoll,
+            originalOutcome: defenderOutcome,
+          }
+        : null;
+  if (rsTarget) {
+    state.currentPhase = 'trait_choice';
+    state.pendingPrompt = {
+      phase: 'trait_choice',
+      description: `${rsTarget.driverName}'s team: Use Reactive Suspension to reroll ${rsTarget.role} Awareness outcome ${rsTarget.originalOutcome}?`,
+      needsInput: true,
+      inputType: 'choice',
+      choices: [
+        { label: `Yes — reroll ${rsTarget.role} Awareness`, value: 'reactive_suspension_yes' },
+        { label: 'No — keep original result', value: 'reactive_suspension_no' },
+      ],
+      context: {
+        type: 'reactive_suspension',
+        attackerId,
+        defenderId,
+        awarenessDiff,
+        wetIndependentAwareness,
+        attackerRoll,
+        defenderRoll,
+        targetRole: rsTarget.role,
+        targetDriverId: rsTarget.driverId,
+        targetDriverName: rsTarget.driverName,
+        targetTeamId: rsTarget.teamId,
+        targetOriginalRoll: rsTarget.originalRoll,
+        targetOriginalOutcome: rsTarget.originalOutcome,
+        rsConsumedAttacker,
+        rsConsumedDefender,
+        originalAttackerOutcome: ctx?.originalAttackerOutcome,
+        originalDefenderOutcome: ctx?.originalDefenderOutcome,
+      },
+    };
+    return state;
+  }
+
   race.eventLog.push({
     lap: race.currentLap,
     type: 'awareness',
@@ -1948,11 +2041,27 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   // reached via a reroll, only apply the new defender outcome if it is
   // "safer" than the original. Otherwise, keep the original; if that
   // original was Position Swap, downgrade to a simple -1 position loss.
+  const originalAttackerOutcome = ctx?.originalAttackerOutcome as AwarenessOutcome | undefined;
   const originalDefenderOutcome = ctx?.originalDefenderOutcome as AwarenessOutcome | undefined;
-  const rsConsumed = (ctx?.rsConsumed as boolean | undefined) ?? false;
+  const wasAttackerReroll = (ctx?.rsConsumedAttacker as boolean | undefined) ?? false;
+  const wasDefenderReroll = (ctx?.rsConsumedDefender as boolean | undefined) ?? false;
+  let attackerPositionShiftAsDropOne = false;
   let defenderPositionShiftAsDropOne = false;
 
-  if (rsConsumed && originalDefenderOutcome) {
+  if (wasAttackerReroll && originalAttackerOutcome) {
+    const newTier = AWARENESS_RISK_TIER[attackerOutcome];
+    const origTier = AWARENESS_RISK_TIER[originalAttackerOutcome];
+    if (newTier < origTier) {
+      // New outcome is safer — accept it as-is.
+    } else {
+      if (originalAttackerOutcome === 'positionShift') {
+        attackerPositionShiftAsDropOne = true;
+      }
+      attackerOutcome = originalAttackerOutcome;
+    }
+  }
+
+  if (wasDefenderReroll && originalDefenderOutcome) {
     const newTier = AWARENESS_RISK_TIER[defenderOutcome];
     const origTier = AWARENESS_RISK_TIER[originalDefenderOutcome];
     if (newTier < origTier) {
@@ -2054,7 +2163,14 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
     second.position = tmp;
   };
 
-  if (defenderPositionShiftAsDropOne) {
+  if (attackerPositionShiftAsDropOne) {
+    applyPositionLoss(race, attackerId, 1);
+    race.eventLog.push({
+      lap: race.currentLap,
+      type: 'awareness',
+      description: `${attacker.name} keeps original Position Swap via Reactive Suspension fallback — drops one position instead of full swap.`,
+    });
+  } else if (defenderPositionShiftAsDropOne) {
     // Special RS fallback: original outcome was Position Swap but the
     // reroll was worse. Instead of a full swap, the defender simply
     // drops one position.

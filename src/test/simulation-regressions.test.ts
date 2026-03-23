@@ -293,4 +293,80 @@ describe('simulation regressions', () => {
     const next = advanceGMState(gm, 6);
     expect(next.raceState.raceFlag).toBe('redFlag');
   });
+
+  it('offers Reactive Suspension trait choice when defender has non-clean awareness outcome', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS.slice(0, 3);
+    const teams = INITIAL_TEAMS
+      .filter(t => drivers.some(d => d.teamId === t.id))
+      .map(t => ({ ...t, traitId: 'reactive_suspension' as const }));
+    const cars = getCarsForDrivers(teams, drivers);
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
+
+    const attackerId = gm.raceState.standings[1].driverId;
+    const defenderId = gm.raceState.standings[0].driverId;
+
+    gm.currentPhase = 'awareness_roll';
+    gm.raceState.currentLap = 1;
+    gm.pendingPrompt = {
+      phase: 'awareness_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        attackerId,
+        defenderId,
+        awarenessDiff: 7,
+        waitingFor: 'defender',
+        attackerRoll: 4,
+      },
+    };
+
+    const next = advanceGMState(gm, 4);
+    expect(next.currentPhase).toBe('trait_choice');
+    expect(next.pendingPrompt?.phase).toBe('trait_choice');
+    const choiceValues = next.pendingPrompt?.choices?.map(c => c.value) ?? [];
+    expect(choiceValues).toContain('reactive_suspension_yes');
+    expect(choiceValues).toContain('reactive_suspension_no');
+  });
+
+  it('allows Reactive Suspension for attacker outcome when attacker team has the trait', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS.slice(0, 3);
+    const teams = INITIAL_TEAMS
+      .filter(t => drivers.some(d => d.teamId === t.id))
+      .map(t => ({ ...t, traitId: null as string | null }));
+    const cars = getCarsForDrivers(teams, drivers);
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
+
+    const attackerId = gm.raceState.standings[1].driverId;
+    const defenderId = gm.raceState.standings[0].driverId;
+    const attacker = gm.raceState.drivers.find(d => d.id === attackerId)!;
+    const attackerTeam = gm.teams.find(t => t.id === attacker.teamId)!;
+    attackerTeam.traitId = 'reactive_suspension';
+    gm.raceState.teams = gm.teams;
+    gm.traitRuntime = initGMSession(track, drivers, cars, gm.teams, 'medium', 5).traitRuntime;
+
+    gm.currentPhase = 'awareness_roll';
+    gm.raceState.currentLap = 1;
+    gm.pendingPrompt = {
+      phase: 'awareness_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        attackerId,
+        defenderId,
+        awarenessDiff: 7,
+        waitingFor: 'defender',
+        attackerRoll: 4, // majorDamage
+      },
+    };
+
+    const next = advanceGMState(gm, 2); // defender clean
+    expect(next.currentPhase).toBe('trait_choice');
+    expect((next.pendingPrompt?.context as Record<string, unknown> | undefined)?.targetRole).toBe('attacker');
+  });
 });
