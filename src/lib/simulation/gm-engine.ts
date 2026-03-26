@@ -64,6 +64,7 @@ export type GMPhase =
   | 'awareness_roll'
   | 'trait_choice'
   | 'tyre_check'
+  | 'puncture_roll'
   | 'lap_end'
   | 'race_complete'
   | 'experimental_parts_roll'
@@ -842,6 +843,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
 
     case 'tyre_check': {
       // Tyre degradation & puncture checks based on status bands
+      const punctureQueue: string[] = [];
       race.standings.forEach(s => {
         if (s.isDNF) return;
         const driver = race.drivers.find(d => d.id === s.driverId)!;
@@ -866,17 +868,88 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
         }
 
         if (status === 'worn' && !s.tyreState.isPunctured) {
-          const pRoll = Math.floor(Math.random() * 6) + 1;
-          if (pRoll === 1) {
-            s.tyreState = { ...s.tyreState, isPunctured: true, forcedPit: true };
-            race.eventLog.push({
-              lap: race.currentLap,
-              type: 'puncture',
-              description: `${driver.name}: PUNCTURE! (d6=${pRoll})`,
-            });
-          }
+          // Roll d6 for puncture risk on each worn tyre (manual, one driver at a time).
+          punctureQueue.push(s.driverId);
         }
       });
+
+      if (punctureQueue.length > 0) {
+        const driverId = punctureQueue[0];
+        const driverName = race.drivers.find(d => d.id === driverId)?.name ?? driverId;
+        state.currentPhase = 'puncture_roll';
+        state.pendingPrompt = {
+          phase: 'puncture_roll',
+          description: `${driverName}: Worn tyre puncture risk — roll d6 (1 = puncture)`,
+          needsInput: true,
+          inputType: 'roll',
+          diceSize: 6,
+          context: { punctureQueue, punctureDriverIndex: 0, currentLapNum: race.currentLap },
+        };
+        return state;
+      }
+
+      state.currentPhase = 'lap_end';
+      if (race.currentLap >= race.totalLaps) {
+        state.currentPhase = 'race_complete';
+        race.isComplete = true;
+        state.pendingPrompt = { phase: 'race_complete', description: 'Race complete!', needsInput: false };
+      } else {
+        state.pendingPrompt = {
+          phase: 'lap_end',
+          description: `Lap ${race.currentLap} complete. Press continue for next lap.`,
+          needsInput: true, inputType: 'confirm',
+        };
+      }
+      return state;
+    }
+
+    case 'puncture_roll': {
+      const rollValue = typeof input === 'number' ? input : parseInt(String(input ?? ''), 10);
+      if (isNaN(rollValue) || rollValue < 1 || rollValue > 6) return state;
+
+      const ctx = state.pendingPrompt?.context as Record<string, unknown> | undefined;
+      const punctureQueue = (ctx?.punctureQueue as string[]) ?? [];
+      const punctureDriverIndex = (ctx?.punctureDriverIndex as number) ?? 0;
+      const currentLapNum = (ctx?.currentLapNum as number) ?? race.currentLap;
+
+      if (punctureDriverIndex >= punctureQueue.length) {
+        state.pendingPrompt = null;
+        state.currentPhase = 'lap_end';
+        return advanceGMState(state);
+      }
+
+      const driverId = punctureQueue[punctureDriverIndex];
+      const driver = race.drivers.find(d => d.id === driverId);
+      const s = race.standings.find(ss => ss.driverId === driverId);
+
+      if (s && driver && !s.isDNF && !s.tyreState.isPunctured) {
+        const status = getTyreStatus(race.track, s.tyreState.compound, s.tyreState.currentLap, race.weather);
+        if (status === 'worn' && rollValue === 1) {
+          s.tyreState = { ...s.tyreState, isPunctured: true, forcedPit: true };
+          race.eventLog.push({
+            lap: currentLapNum,
+            type: 'puncture',
+            description: `${driver.name}: PUNCTURE! (d6=${rollValue})`,
+          });
+        }
+      }
+
+      const nextIndex = punctureDriverIndex + 1;
+      if (nextIndex < punctureQueue.length) {
+        const nextDriverId = punctureQueue[nextIndex];
+        const nextDriverName = race.drivers.find(d => d.id === nextDriverId)?.name ?? nextDriverId;
+        state.pendingPrompt = {
+          phase: 'puncture_roll',
+          description: `${nextDriverName}: Worn tyre puncture risk — roll d6 (1 = puncture)`,
+          needsInput: true,
+          inputType: 'roll',
+          diceSize: 6,
+          context: { punctureQueue, punctureDriverIndex: nextIndex, currentLapNum },
+        };
+        return state;
+      }
+
+      state.pendingPrompt = null;
       state.currentPhase = 'lap_end';
       if (race.currentLap >= race.totalLaps) {
         state.currentPhase = 'race_complete';
