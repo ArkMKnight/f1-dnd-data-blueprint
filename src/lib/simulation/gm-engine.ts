@@ -34,6 +34,8 @@ import {
 import {
   statToModifier,
   getModifiedDriverStat,
+  getTrackBonusTiers,
+  getTrackMatchScore,
   getMonacoRacecraftBonus,
   getMexicoOvertakeRacecraftBonus,
   getMexicoDefendingAwarenessBonus,
@@ -289,7 +291,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
       // Team double stack: if both drivers of a team pit on the same lap,
       // the car that was behind on track takes an additional pit position loss.
       const doubleStackDrivers = new Set<string>();
-      if ((race.track.name === 'Monaco' || race.track.name === 'Mexico') && race.currentLap < race.totalLaps) {
+      if (race.track.pitLossDoubleStack > 0 && race.currentLap < race.totalLaps) {
         const byTeam: Record<string, { driverId: string; position: number }[]> = {};
         race.standings.forEach(s => {
           if (s.isDNF) return;
@@ -352,7 +354,7 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           s.hasPitted = true;
           let positionsLost = getPitPositionLossForFlag();
           // Apply double-stack penalty to the trailing car in a team double stop.
-          if ((race.track.name === 'Monaco' || race.track.name === 'Mexico') && doubleStackDrivers.has(s.driverId) && race.track.pitLossDoubleStack > 0) {
+          if (doubleStackDrivers.has(s.driverId) && race.track.pitLossDoubleStack > 0) {
             const doubleStackLoss =
               race.raceFlag === 'safetyCar'
                 ? (race.track.pitLossDoubleStackSafetyCar ?? race.track.pitLossDoubleStack)
@@ -688,6 +690,28 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           const tmp = aState.position;
           aState.position = dState.position;
           dState.position = tmp;
+
+          // Azerbaijan — Positioning Battle:
+          // If this was the boosted (second) defense opportunity, failing it drops
+          // an extra position (total -2 instead of -1).
+          if (race.track.name === 'Azerbaijan') {
+            const dRT = state.traitRuntime.driverTraits[defenderId];
+            const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+            const wasSecondAttempt = dFlags?.positioningBattle_secondAttemptActive === true;
+            if (wasSecondAttempt) {
+              applyPositionLoss(race, defender.id, 1);
+              race.eventLog.push({
+                lap: race.currentLap,
+                type: 'positioning_battle',
+                description: `${defender.name} fails Positioning Battle second opportunity — drops 2 positions total.`,
+              });
+            }
+            if (dFlags) {
+              dFlags.positioningBattle_bonusAvailable = false;
+              dFlags.positioningBattle_secondAttemptActive = false;
+            }
+          }
+
           appendLiveRaceEvent(race, {
             lapNumber: race.currentLap,
             type: 'overtake',
@@ -709,6 +733,17 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
               ? `${defender.name}'s team used Flexible Strategy — position unchanged; -1 Awareness for rest of race.`
               : `${defender.name}'s team used Flexible Strategy — position unchanged; no Awareness penalty (outside top 10).`,
           });
+
+          // Azerbaijan — Positioning Battle:
+          // Flexible Strategy ignores position loss, so treat as a successful defense
+          // and grant +1 for the defender's next defense opportunity.
+          if (race.track.name === 'Azerbaijan') {
+            const dFlags = dTr?.flags as Record<string, unknown> | undefined;
+            if (dFlags) {
+              dFlags.positioningBattle_bonusAvailable = true;
+              dFlags.positioningBattle_secondAttemptActive = false;
+            }
+          }
         }
 
         const defenderAwarenessForDiffFS =
@@ -1164,6 +1199,22 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
     defenderPhase1 = 2 * dRacecraftMod;
   }
 
+  // Azerbaijan — Positioning Battle:
+  // After a successful defense, gain +1 for the next defense opportunity.
+  // If you then fail that second opportunity, you drop 2 positions instead of 1.
+  let defenderSecondAttemptActive = false;
+  if (race.track.name === 'Azerbaijan') {
+    const dRT = state.traitRuntime.driverTraits[defender.id];
+    const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+    const bonusAvailable = dFlags?.positioningBattle_bonusAvailable === true;
+    if (bonusAvailable) {
+      defenderSecondAttemptActive = true;
+      dFlags!.positioningBattle_bonusAvailable = false;
+      dFlags!.positioningBattle_secondAttemptActive = true;
+      defenderPhase1 += 1; // +1 Pace mod equivalent on the next defense roll
+    }
+  }
+
   const aPaceDisplay = raceIntelligenceActive ? 0 : aPaceMod;
   const aTyreDisplay = raceIntelligenceActive ? null : aTyreMods.paceDelta;
   const aRacecraftDisplay = raceIntelligenceActive ? 2 * aRacecraftMod : aRacecraftMod;
@@ -1213,6 +1264,13 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
   let dTotal = defenderTraitResult.result.finalTotal;
   if (aAct.includes('power_unit_overdrive')) aTotal += 3;
   if (dAct.includes('power_unit_overdrive')) dTotal += 3;
+
+  // Consume "next roll" temporary modifiers after they have been applied
+  // to this contested roll's totals.
+  const attackerRT = state.traitRuntime.driverTraits[attacker.id];
+  const defenderRT = state.traitRuntime.driverTraits[defender.id];
+  if (attackerRT?.temporaryModifiers) delete attackerRT.temporaryModifiers['pace:nextRoll'];
+  if (defenderRT?.temporaryModifiers) delete defenderRT.temporaryModifiers['pace:nextRoll'];
 
   [aAct, dAct].forEach((list, idx) => {
     const driverId = idx === 0 ? attacker.id : defender.id;
@@ -1359,6 +1417,22 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       defenderTeamTraitId === 'flexible_strategy' &&
       (state.traitRuntime.teamTraits[defenderTeam.id]?.usesRemaining ?? 0) > 0;
 
+    // Azerbaijan Track Bonus — Late Braking Gamble:
+    // If the overtake succeeds by 4+, and match score is 200+, grant +1 Pace
+    // for the attacker's next contested roll. (Must apply even if Flexible Strategy is used.)
+    if (race.track.name === 'Azerbaijan' && aTotal - dTotal >= 4) {
+      const matchScore = getTrackMatchScore(carA, race.track);
+      const tiers = getTrackBonusTiers(matchScore);
+      if (tiers.trackSpecificBonusEligible) {
+        const rt = state.traitRuntime.driverTraits[attacker.id];
+        if (rt) {
+          rt.temporaryModifiers = rt.temporaryModifiers || {};
+          rt.temporaryModifiers['pace:nextRoll'] =
+            (rt.temporaryModifiers['pace:nextRoll'] ?? 0) + 1;
+        }
+      }
+    }
+
     if (hasFlexibleStrategy) {
       state.currentPhase = 'trait_choice';
       state.pendingPrompt = {
@@ -1394,6 +1468,26 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       primaryDriverId: attacker.id,
       secondaryDriverId: defender.id,
     });
+
+    // Azerbaijan — Positioning Battle failure:
+    // If the defender was on their boosted (second) defense opportunity,
+    // failing this defense means dropping 2 positions total instead of 1.
+    if (race.track.name === 'Azerbaijan') {
+      const dRT = state.traitRuntime.driverTraits[defender.id];
+      const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+      if (dFlags) {
+        if (defenderSecondAttemptActive) {
+          applyPositionLoss(race, defender.id, 1);
+          race.eventLog.push({
+            lap: race.currentLap,
+            type: 'positioning_battle',
+            description: `${defender.name} fails Positioning Battle second opportunity — drops 2 positions total.`,
+          });
+        }
+        dFlags.positioningBattle_bonusAvailable = false;
+        dFlags.positioningBattle_secondAttemptActive = false;
+      }
+    }
 
     // Momentum Driver (GM mode): after a successful overtake, grant
     // +1 Pace modifier on the attacker's *next* contested roll.
@@ -1490,6 +1584,17 @@ const resolveContestedRolls = (state: GMState, attackerRoll: number, defenderRol
       }
     }
   } else {
+    // Azerbaijan — Positioning Battle:
+    // Any successful defense sets up +1 for the defender's next defense opportunity.
+    if (race.track.name === 'Azerbaijan') {
+      const dRT = state.traitRuntime.driverTraits[defender.id];
+      const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+      if (dFlags) {
+        dFlags.positioningBattle_bonusAvailable = true;
+        dFlags.positioningBattle_secondAttemptActive = false;
+      }
+    }
+
     if (hasRelentless) {
       // Initial failed attempt logged, then set up Relentless retry.
       appendLiveRaceEvent(race, {
@@ -1661,6 +1766,23 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
     defenderPhase1 = 2 * dRacecraftMod;
   }
 
+  // Azerbaijan — Positioning Battle:
+  // Consume the +1 bonus on this (second) defense opportunity, if available.
+  let defenderSecondAttemptActive = false;
+  if (race.track.name === 'Azerbaijan') {
+    const dRT = state.traitRuntime.driverTraits[defender.id];
+    const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+    const bonusAvailable = dFlags?.positioningBattle_bonusAvailable === true;
+    if (bonusAvailable) {
+      defenderSecondAttemptActive = true;
+      if (dFlags) {
+        dFlags.positioningBattle_bonusAvailable = false;
+        dFlags.positioningBattle_secondAttemptActive = true;
+      }
+      defenderPhase1 += 1; // +1 Pace equivalent for the next defense roll
+    }
+  }
+
   const raPaceDisplay = rRaceIntelligenceActive ? 0 : aPaceMod;
   const raTyreDisplay = rRaceIntelligenceActive ? null : aTyreMods.paceDelta;
   const raRacecraftDisplay = rRaceIntelligenceActive ? 2 * aRacecraftMod : aRacecraftMod;
@@ -1711,6 +1833,13 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
   let dTotal = defenderTraitResult.result.finalTotal;
   if (aAct.includes('power_unit_overdrive')) aTotal += 3;
   if (dAct.includes('power_unit_overdrive')) dTotal += 3;
+
+  // Consume "next roll" temporary modifiers after they have been applied
+  // to this retry roll's totals.
+  const attackerRT = state.traitRuntime.driverTraits[attacker.id];
+  const defenderRT = state.traitRuntime.driverTraits[defender.id];
+  if (attackerRT?.temporaryModifiers) delete attackerRT.temporaryModifiers['pace:nextRoll'];
+  if (defenderRT?.temporaryModifiers) delete defenderRT.temporaryModifiers['pace:nextRoll'];
 
   [aAct, dAct].forEach((list, idx) => {
     const driverId = idx === 0 ? attacker.id : defender.id;
@@ -1817,6 +1946,26 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
       primaryDriverId: attacker.id,
       secondaryDriverId: defender.id,
     });
+
+    // Azerbaijan — Positioning Battle failure:
+    // If the defender was on their boosted (second) defense opportunity,
+    // failing it drops 2 positions total instead of 1.
+    if (race.track.name === 'Azerbaijan') {
+      const dRT = state.traitRuntime.driverTraits[defender.id];
+      const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+      if (dFlags) {
+        if (defenderSecondAttemptActive) {
+          applyPositionLoss(race, defender.id, 1);
+          race.eventLog.push({
+            lap: race.currentLap,
+            type: 'positioning_battle',
+            description: `${defender.name} fails Positioning Battle second opportunity (Relentless retry) — drops 2 positions total.`,
+          });
+        }
+        dFlags.positioningBattle_bonusAvailable = false;
+        dFlags.positioningBattle_secondAttemptActive = false;
+      }
+    }
   } else {
     appendLiveRaceEvent(race, {
       lapNumber: race.currentLap,
@@ -1825,6 +1974,33 @@ const resolveRelentlessRetry = (state: GMState, attackerRoll: number, defenderRo
       primaryDriverId: defender.id,
       secondaryDriverId: attacker.id,
     });
+
+    // Azerbaijan — Positioning Battle:
+    // Any successful defense sets up +1 for the defender's next defense opportunity.
+    if (race.track.name === 'Azerbaijan') {
+      const dRT = state.traitRuntime.driverTraits[defender.id];
+      const dFlags = dRT?.flags as Record<string, unknown> | undefined;
+      if (dFlags) {
+        dFlags.positioningBattle_bonusAvailable = true;
+        dFlags.positioningBattle_secondAttemptActive = false;
+      }
+    }
+  }
+
+  // Azerbaijan Track Bonus — Late Braking Gamble:
+  // If the overtake succeeds by 4+, and match score is 200+, grant +1 Pace
+  // for the attacker's next contested roll.
+  if (race.track.name === 'Azerbaijan' && overtakeSuccess && aTotal - dTotal >= 4) {
+    const matchScore = getTrackMatchScore(carA, race.track);
+    const tiers = getTrackBonusTiers(matchScore);
+    if (tiers.trackSpecificBonusEligible) {
+      const rt = state.traitRuntime.driverTraits[attacker.id];
+      if (rt) {
+        rt.temporaryModifiers = rt.temporaryModifiers || {};
+        rt.temporaryModifiers['pace:nextRoll'] =
+          (rt.temporaryModifiers['pace:nextRoll'] ?? 0) + 1;
+      }
+    }
   }
 
   // Live Race Events for criticals on the Relentless retry.
@@ -1954,12 +2130,22 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
 
   const attacker = race.drivers.find(d => d.id === attackerId)!;
   const defender = race.drivers.find(d => d.id === defenderId)!;
-  const attackerDiffD6 = wetIndependentAwareness
-    ? mapSingleDriverAwarenessToDifference(attacker.awareness)
-    : effectiveDiffShared;
-  const defenderDiffD6 = wetIndependentAwareness
-    ? mapSingleDriverAwarenessToDifference(defender.awareness + persistentAwarenessMod)
-    : effectiveDiffShared;
+  const azWallsDontForgive =
+    race.track.name === 'Azerbaijan' &&
+    attacker.awareness < 10 &&
+    defender.awareness + persistentAwarenessMod < 10;
+
+  const attackerDiffD6 = azWallsDontForgive
+    ? 7
+    : wetIndependentAwareness
+      ? mapSingleDriverAwarenessToDifference(attacker.awareness)
+      : effectiveDiffShared;
+
+  const defenderDiffD6 = azWallsDontForgive
+    ? 7
+    : wetIndependentAwareness
+      ? mapSingleDriverAwarenessToDifference(defender.awareness + persistentAwarenessMod)
+      : effectiveDiffShared;
 
   const attackerTeam = state.teams.find(t => t.id === attacker.teamId)!;
   const defenderTeam = state.teams.find(t => t.id === defender.teamId)!;
@@ -2171,39 +2357,78 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
   applyDamage(dState, defenderOutcome);
 
   // Safety Car / Red Flag from collision damage
-  // Only trigger flags when BOTH final states were produced by THIS awareness check,
-  // not when one/both cars were already in that state beforehand.
-  const attackerDamage = aState.damageState.state;
-  const defenderDamage = dState.damageState.state;
-  const bothFreshMajorFromThisCheck =
-    attackerDamage === 'major' &&
-    defenderDamage === 'major' &&
-    attackerDamageBeforeAwareness !== 'major' &&
-    defenderDamageBeforeAwareness !== 'major';
-  const bothFreshDnfFromThisCheck =
-    attackerDamage === 'dnf' &&
-    defenderDamage === 'dnf' &&
-    attackerDamageBeforeAwareness !== 'dnf' &&
-    defenderDamageBeforeAwareness !== 'dnf';
-  const flag = bothFreshDnfFromThisCheck
-    ? 'redFlag'
-    : bothFreshMajorFromThisCheck
-      ? 'safetyCar'
-      : 'green';
-  if (flag === 'safetyCar') {
-    race.raceFlag = 'safetyCar';
-    race.eventLog.push({
-      lap: race.currentLap,
-      type: 'flag',
-      description: `Safety Car deployed after collision (both drivers Major Damage).`,
-    });
-  } else if (flag === 'redFlag') {
-    race.raceFlag = 'redFlag';
-    race.eventLog.push({
-      lap: race.currentLap,
-      type: 'flag',
-      description: `Red Flag: both drivers DNF from collision. Positions preserved; free pit stop available next lap.`,
-    });
+  // Azerbaijan ("Better Safe than Sorry"):
+  // - Direct DNF (non-mechanical) => Red Flag (any driver)
+  // - Direct Major Damage+ (majorDamage or dnf) => Safety Car (any driver)
+  // - Red Flag takes precedence
+  if (race.track.name === 'Azerbaijan') {
+    const attackerDirectDnf = attackerOutcome === 'dnf';
+    const defenderDirectDnf = defenderOutcome === 'dnf';
+    const attackerDirectMajorOrHigher = attackerOutcome === 'majorDamage' || attackerOutcome === 'dnf';
+    const defenderDirectMajorOrHigher = defenderOutcome === 'majorDamage' || defenderOutcome === 'dnf';
+
+    const flag = attackerDirectDnf || defenderDirectDnf
+      ? 'redFlag'
+      : attackerDirectMajorOrHigher || defenderDirectMajorOrHigher
+        ? 'safetyCar'
+        : 'green';
+
+    if (flag === 'safetyCar') {
+      race.raceFlag = 'safetyCar';
+      race.eventLog.push({
+        lap: race.currentLap,
+        type: 'flag',
+        description: 'Safety Car deployed (Azerbaijan: direct major damage by either driver).',
+      });
+    } else if (flag === 'redFlag') {
+      race.raceFlag = 'redFlag';
+      race.eventLog.push({
+        lap: race.currentLap,
+        type: 'flag',
+        description: 'Red Flag (Azerbaijan: direct DNF by either driver). Positions preserved; free pit stop available next lap.',
+      });
+    }
+  } else {
+    // Only trigger flags when BOTH final states were produced by THIS awareness check,
+    // not when one/both cars were already in that state beforehand.
+    const attackerFreshMajorFromThisCheck =
+      attackerOutcome === 'majorDamage' &&
+      attackerDamageBeforeAwareness !== 'major' &&
+      attackerDamageBeforeAwareness !== 'dnf';
+    const defenderFreshMajorFromThisCheck =
+      defenderOutcome === 'majorDamage' &&
+      defenderDamageBeforeAwareness !== 'major' &&
+      defenderDamageBeforeAwareness !== 'dnf';
+    const bothFreshMajorFromThisCheck =
+      attackerFreshMajorFromThisCheck && defenderFreshMajorFromThisCheck;
+
+    const attackerFreshDnfFromThisCheck =
+      attackerOutcome === 'dnf' && attackerDamageBeforeAwareness !== 'dnf';
+    const defenderFreshDnfFromThisCheck =
+      defenderOutcome === 'dnf' && defenderDamageBeforeAwareness !== 'dnf';
+    const bothFreshDnfFromThisCheck =
+      attackerFreshDnfFromThisCheck && defenderFreshDnfFromThisCheck;
+    const flag = bothFreshDnfFromThisCheck
+      ? 'redFlag'
+      : bothFreshMajorFromThisCheck
+        ? 'safetyCar'
+        : 'green';
+
+    if (flag === 'safetyCar') {
+      race.raceFlag = 'safetyCar';
+      race.eventLog.push({
+        lap: race.currentLap,
+        type: 'flag',
+        description: `Safety Car deployed after collision (both drivers Major Damage).`,
+      });
+    } else if (flag === 'redFlag') {
+      race.raceFlag = 'redFlag';
+      race.eventLog.push({
+        lap: race.currentLap,
+        type: 'flag',
+        description: `Red Flag: both drivers DNF from collision. Positions preserved; free pit stop available next lap.`,
+      });
+    }
   }
 
   // 2) Momentum Loss (self-only)

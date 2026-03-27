@@ -170,6 +170,24 @@ export interface Track {
     intermediate: TyreStatusBands;
     wet: TyreStatusBands;
   };
+
+  /**
+   * Optional track-specific flavor text pools used to generate event narration.
+   * When omitted, engines fall back to generic descriptions.
+   */
+  commentary?: TrackCommentary;
+}
+
+export interface TrackCommentary {
+  successfulOvertakes: string[];
+  successfulDefenses: string[];
+  majorDamage: string[];
+  minorDamage: string[];
+  dangerousRacing: string[];
+  mechanicalDnfs: string[];
+  safetyCarDeployment: string[];
+  redFlagChaos: string[];
+  momentumLoss: string[];
 }
 
 // ============================================

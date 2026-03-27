@@ -761,7 +761,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
 
     const pickRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
 
-    const overtakeLines: string[] = [
+    const fallbackOvertakeLines: string[] = [
       'The overtaking driver dives to the inside at Sainte Devote—and this time it sticks! The defending driver has to yield!',
       'Out of Portier, the overtaking driver gets the perfect exit and blasts through the Tunnel to complete the move before the Nouvelle Chicane!',
       'Late on the brakes into the Nouvelle Chicane—the overtaking driver commits fully and makes it work!',
@@ -779,7 +779,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       'The overtaking driver stays patient all lap long, then strikes decisively at the Nouvelle Chicane to secure the overtake!',
     ];
 
-    const defenseLines: string[] = [
+    const fallbackDefenseLines: string[] = [
       'The overtaking driver dives to the inside at Sainte Devote, but the defending driver shuts the door just in time!',
       'The overtaking driver gets a better launch out of Portier and pulls alongside into the Tunnel—can he make it stick? No! The defending driver holds firm.',
       'Late on the brakes into the Nouvelle Chicane! The overtaking driver throws it in, but the defending driver keeps the apex.',
@@ -808,7 +808,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       'Through the final corner, the overtaking driver gets the better traction, but the defending driver edges ahead across the line!',
     ];
 
-    const majorDamageLines: string[] = [
+    const fallbackMajorDamageLines: string[] = [
       'The overtaking driver dives into Sainte Devote but clips the rear of the defending driver—huge impact and both cars slam into the barriers!',
       'Into the Nouvelle Chicane, the overtaking driver locks up and makes heavy contact with the defending driver—front wing destroyed and debris everywhere!',
       'Side by side through the Swimming Pool—there’s no space! The overtaking driver touches the barrier and collects the defending driver in a massive crash!',
@@ -816,7 +816,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       'Through Casino Square, the overtaking driver loses the rear under pressure and smashes into the defending driver—serious suspension damage for both!',
     ];
 
-    const minorDamageLines: string[] = [
+    const fallbackMinorDamageLines: string[] = [
       'The overtaking driver taps the rear of the defending driver at Mirabeau—small front wing damage but the fight continues.',
       'Light contact at the Loews Hairpin as the overtaking driver nudges the defending driver—endplate missing but both continue.',
       'The defending driver squeezes the overtaking driver at Tabac—there’s a brush with the wall and slight rear damage.',
@@ -824,7 +824,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       'The overtaking driver makes slight wheel-to-wheel contact at the Nouvelle Chicane—both pick up cosmetic damage but stay racing.',
     ];
 
-    const cleanLines: string[] = [
+    const fallbackDangerousLines: string[] = [
       'The overtaking driver lunges far too late into Rascasse and nearly spears into the defending driver—stewards will look at that one.',
       'The defending driver moves under braking into the Nouvelle Chicane, forcing the overtaking driver to take evasive action!',
       'The overtaking driver attempts a move at Casino from too far back—almost launching over the defending driver’s rear wheel!',
@@ -832,10 +832,18 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
       'The overtaking driver pushes the defending driver toward the barrier at the Swimming Pool—very dangerous positioning there.',
     ];
 
-    const mechanicalLines: string[] = [
+    const fallbackMechanicalLines: string[] = [
       'The overtaking driver was lining up a move into Sainte Devote, but suddenly slows—engine failure! That’s race over in heartbreaking fashion.',
       'The defending driver exits the Tunnel ahead, but smoke pours from the rear—mechanical failure ends the battle instantly!',
     ];
+
+    const pools = track.commentary ?? null;
+    const overtakeLines = (pools?.successfulOvertakes?.length ? pools.successfulOvertakes : fallbackOvertakeLines);
+    const defenseLines = (pools?.successfulDefenses?.length ? pools.successfulDefenses : fallbackDefenseLines);
+    const majorDamageLines = (pools?.majorDamage?.length ? pools.majorDamage : fallbackMajorDamageLines);
+    const minorDamageLines = (pools?.minorDamage?.length ? pools.minorDamage : fallbackMinorDamageLines);
+    const dangerousLines = (pools?.dangerousRacing?.length ? pools.dangerousRacing : fallbackDangerousLines);
+    const mechanicalLines = (pools?.mechanicalDnfs?.length ? pools.mechanicalDnfs : fallbackMechanicalLines);
 
     let template: string;
     switch (category) {
@@ -846,7 +854,7 @@ const GMModePanelComponent = ({ track, drivers, cars, teams, raceConfig, setRace
         template = pickRandom(minorDamageLines);
         break;
       case 'clean':
-        template = pickRandom(cleanLines);
+        template = pickRandom(dangerousLines);
         break;
       case 'mechanical':
         template = pickRandom(mechanicalLines);

@@ -194,7 +194,11 @@ describe('simulation regressions', () => {
   it('deploys Safety Car when both drivers newly reach major damage on the same awareness check', () => {
     const track = TRACKS.find(t => t.id === 'tr2')!;
     const drivers = INITIAL_DRIVERS.slice(0, 3);
-    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    // Disable Reactive Suspension for this test so the flag resolves immediately
+    // after final Awareness resolution (no reroll prompt).
+    const teams = INITIAL_TEAMS
+      .filter(t => drivers.some(d => d.teamId === t.id))
+      .map(t => ({ ...t, traitId: null as string | null }));
     const cars = getCarsForDrivers(teams, drivers);
     const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
 
@@ -265,7 +269,11 @@ describe('simulation regressions', () => {
   it('triggers Red Flag when both drivers newly DNF on the same awareness check', () => {
     const track = TRACKS.find(t => t.id === 'tr2')!;
     const drivers = INITIAL_DRIVERS.slice(0, 3);
-    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    // Disable Reactive Suspension for this test so the flag resolves immediately
+    // after final Awareness resolution (no reroll prompt).
+    const teams = INITIAL_TEAMS
+      .filter(t => drivers.some(d => d.teamId === t.id))
+      .map(t => ({ ...t, traitId: null as string | null }));
     const cars = getCarsForDrivers(teams, drivers);
     const gm = initGMSession(track, drivers, cars, teams, 'medium', 5);
 

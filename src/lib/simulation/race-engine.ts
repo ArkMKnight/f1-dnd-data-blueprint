@@ -617,6 +617,21 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
         defenderPunctureMod;
     }
 
+    // Azerbaijan — Positioning Battle:
+    // If the defender has a saved +1 for their next defense opportunity,
+    // consume it here and boost the defender's contested roll.
+    let defenderSecondAttemptActive = false;
+    if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+      const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+      const bonusAvailable = dFlags?.positioningBattle_bonusAvailable === true;
+      if (bonusAvailable && dFlags) {
+        defenderSecondAttemptActive = true;
+        dFlags.positioningBattle_bonusAvailable = false;
+        dFlags.positioningBattle_secondAttemptActive = true;
+        defenderTotal += 1;
+      }
+    }
+
     // Criticals are based on the raw d20 roll (not the total).
     const attackerCritSuccess = aRoll.roll === 20;
     const defenderCritSuccess = dRoll.roll === 20;
@@ -734,6 +749,17 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             ? `${defender.name}'s team used Flexible Strategy — position unchanged; -1 Awareness rest of race.`
             : `${defender.name}'s team used Flexible Strategy — position unchanged; no Awareness penalty (outside top 10).`,
         });
+
+        // Azerbaijan — Positioning Battle:
+        // Flexible Strategy ignores position loss, so treat this as a successful defense
+        // and grant +1 for the defender's next defense opportunity.
+        if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+          const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+          if (dFlags) {
+            dFlags.positioningBattle_bonusAvailable = true;
+            dFlags.positioningBattle_secondAttemptActive = false;
+          }
+        }
       } else {
         const aPos = attackerState.position;
         const dPos = defenderState.position;
@@ -748,6 +774,25 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           secondaryDriverId: defender.id,
         });
 
+        // Azerbaijan — Positioning Battle failure:
+        // If the defender was on their boosted (second) defense opportunity,
+        // failing it drops 2 positions total instead of 1.
+        if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+          const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+          if (dFlags) {
+            if (defenderSecondAttemptActive) {
+              standings = applyPositionLoss(standings, defender.id, 1);
+              newState.eventLog.push({
+                lap,
+                type: 'positioning_battle',
+                description: `${defender.name} fails Positioning Battle second opportunity — drops 2 positions total.`,
+              });
+            }
+            dFlags.positioningBattle_bonusAvailable = false;
+            dFlags.positioningBattle_secondAttemptActive = false;
+          }
+        }
+
         if (traitRuntime && teams) {
           const atId = attacker.traitId ?? attacker.trait ?? null;
           const atDef = atId ? TRAITS_BY_ID[atId] : undefined;
@@ -757,6 +802,26 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               tr.temporaryModifiers = tr.temporaryModifiers || {};
               tr.temporaryModifiers['pace:nextRoll'] = 1;
             }
+          }
+        }
+      }
+
+      // Azerbaijan Track Bonus — Late Braking Gamble:
+      // When an overtake succeeds by 4+, grant +1 Pace for the attacker's next encounter.
+      if (
+        newState.track.name === 'Azerbaijan' &&
+        traitRuntime &&
+        teams &&
+        attackerTotal - defenderTotal >= 4
+      ) {
+        const matchScore = getTrackMatchScore(carA, newState.track);
+        const tiers = getTrackBonusTiers(matchScore);
+        if (tiers.trackSpecificBonusEligible) {
+          const tr = traitRuntime.driverTraits[attackerId];
+          if (tr) {
+            tr.temporaryModifiers = tr.temporaryModifiers || {};
+            tr.temporaryModifiers['pace:nextRoll'] =
+              (tr.temporaryModifiers['pace:nextRoll'] ?? 0) + 1;
           }
         }
       }
@@ -796,8 +861,16 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           attacker.awareness,
           defenderAwarenessForDiff
         );
-        let effectiveDiff = difference;
-        if (traitRuntime) {
+        const azFlexibleAwarenessMod =
+          traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
+
+        const azWallsDontForgive =
+          newState.track.name === 'Azerbaijan' &&
+          attacker.awareness < 10 &&
+          defenderAwarenessForDiff + azFlexibleAwarenessMod < 10;
+
+        let effectiveDiff = azWallsDontForgive ? 7 : difference;
+        if (!azWallsDontForgive && traitRuntime) {
           const mod =
             traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
           effectiveDiff = difference + mod;
@@ -814,9 +887,11 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               : defender
             : null;
 
-        const diffForCategory = failingDriverForCategory
-          ? mapSingleDriverAwarenessToDifference(failingDriverForCategory.awareness)
-          : effectiveDiff;
+        const diffForCategory = azWallsDontForgive
+          ? 7
+          : failingDriverForCategory
+            ? mapSingleDriverAwarenessToDifference(failingDriverForCategory.awareness)
+            : effectiveDiff;
 
         const category = determineAwarenessOutcomeCategory(diffForCategory);
 
@@ -861,8 +936,17 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           if (wetForcingAwareness) {
             const flexMod =
               traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
-            const aDiff = mapSingleDriverAwarenessToDifference(attacker.awareness);
-            const dDiff = mapSingleDriverAwarenessToDifference(defender.awareness + flexMod);
+          const azWallsDontForgiveWet =
+            newState.track.name === 'Azerbaijan' &&
+            attacker.awareness < 10 &&
+            defender.awareness + flexMod < 10;
+
+          const aDiff = azWallsDontForgiveWet
+            ? 7
+            : mapSingleDriverAwarenessToDifference(attacker.awareness);
+          const dDiff = azWallsDontForgiveWet
+            ? 7
+            : mapSingleDriverAwarenessToDifference(defender.awareness + flexMod);
 
             let d6a = createDiceResult('awareness', 'd6', 6);
             let d6d = createDiceResult('awareness', 'd6', 6);
@@ -1108,6 +1192,17 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           secondaryDriverId: attacker.id,
         });
 
+        // Azerbaijan — Positioning Battle:
+        // Successful defense (even though Relentless triggers a retry) sets up
+        // +1 for the defender's next defense opportunity.
+        if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+          const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+          if (dFlags) {
+            dFlags.positioningBattle_bonusAvailable = true;
+            dFlags.positioningBattle_secondAttemptActive = false;
+          }
+        }
+
         // Immediate retry with -1 Pace and forced Awareness.
         const retryAttackerRoll = createDiceResult('overtake', 'd20', 20);
         const retryDefenderRoll = createDiceResult('defend', 'd20', 20);
@@ -1212,6 +1307,20 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             defenderPunctureMod;
         }
 
+        // Azerbaijan — Positioning Battle:
+        // Consume the +1 bonus on the defender's next defense opportunity for this Relentless retry.
+        let retryDefenderSecondAttemptActive = false;
+        if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+          const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+          const bonusAvailable = dFlags?.positioningBattle_bonusAvailable === true;
+          if (bonusAvailable && dFlags) {
+            retryDefenderSecondAttemptActive = true;
+            dFlags.positioningBattle_bonusAvailable = false;
+            dFlags.positioningBattle_secondAttemptActive = true;
+            retryDefenderTotal += 1;
+          }
+        }
+
         // Criticals on Relentless retry are also based on raw d20.
         const retryAttackerCritSuccess = retryAttackerRoll.roll === 20;
         const retryDefenderCritSuccess = retryDefenderRoll.roll === 20;
@@ -1311,6 +1420,25 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             primaryDriverId: attacker.id,
             secondaryDriverId: defender.id,
           });
+
+          // Azerbaijan — Positioning Battle failure on Relentless retry.
+          // If the defender was on their boosted (second) defense opportunity,
+          // failing it drops 2 positions total instead of 1.
+          if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+            const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+            if (dFlags) {
+              if (retryDefenderSecondAttemptActive) {
+                standings = applyPositionLoss(standings, defender.id, 1);
+                newState.eventLog.push({
+                  lap,
+                  type: 'positioning_battle',
+                  description: `${defender.name} fails Positioning Battle second opportunity on Relentless retry — drops 2 positions total.`,
+                });
+              }
+              dFlags.positioningBattle_bonusAvailable = false;
+              dFlags.positioningBattle_secondAttemptActive = false;
+            }
+          }
         } else {
           appendLiveRaceEvent(newState, {
             lapNumber: lap,
@@ -1319,6 +1447,16 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             primaryDriverId: defender.id,
             secondaryDriverId: attacker.id,
           });
+
+          // Azerbaijan — Positioning Battle:
+          // Successful defense sets up +1 for the defender's next defense opportunity.
+          if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+            const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+            if (dFlags) {
+              dFlags.positioningBattle_bonusAvailable = true;
+              dFlags.positioningBattle_secondAttemptActive = false;
+            }
+          }
         }
 
         // Forced Awareness on retry, regardless of roll difference.
@@ -1331,8 +1469,15 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           attacker.awareness,
           retryDefenderAwareness
         );
-        let retryEffectiveDiff = retryDiff;
-        if (traitRuntime) {
+        const azWallsDontForgiveRetry =
+          newState.track.name === 'Azerbaijan' &&
+          attacker.awareness < 10 &&
+          retryDefenderAwareness +
+            (traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0) <
+            10;
+
+        let retryEffectiveDiff = azWallsDontForgiveRetry ? 7 : retryDiff;
+        if (!azWallsDontForgiveRetry && traitRuntime) {
           const mod =
             traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
           retryEffectiveDiff = retryDiff + mod;
@@ -1472,6 +1617,16 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
           secondaryDriverId: attacker.id,
         });
 
+        // Azerbaijan — Positioning Battle:
+        // Successful defense sets up +1 for the defender's next defense opportunity.
+        if (newState.track.name === 'Azerbaijan' && traitRuntime) {
+          const dFlags = traitRuntime.driverTraits[defenderId]?.flags as Record<string, unknown> | undefined;
+          if (dFlags) {
+            dFlags.positioningBattle_bonusAvailable = true;
+            dFlags.positioningBattle_secondAttemptActive = false;
+          }
+        }
+
         // Normal awareness check for failed overtake (or extra check from Drag Reduction Focus on big fail)
         const rollDiff = Math.abs(attackerTotal - defenderTotal);
         const attackerHasDragFocus = (attacker.traitId ?? attacker.trait) === 'drag_reduction_focus' && TRAITS_BY_ID['drag_reduction_focus']?.isEnabled;
@@ -1503,8 +1658,15 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             attacker.awareness,
             failDefenderAwareness
           );
-          let failEffectiveDiff = failDiff;
-          if (traitRuntime) {
+          const azWallsDontForgiveFail =
+            newState.track.name === 'Azerbaijan' &&
+            attacker.awareness < 10 &&
+            failDefenderAwareness +
+              (traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0) <
+              10;
+
+          let failEffectiveDiff = azWallsDontForgiveFail ? 7 : failDiff;
+          if (!azWallsDontForgiveFail && traitRuntime) {
             const mod =
               traitRuntime.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
             failEffectiveDiff = failDiff + mod;
@@ -1543,8 +1705,13 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             if (wetForcingAwareness) {
               const flexModF =
                 traitRuntime?.driverTraits[defenderId]?.temporaryModifiers?.['awareness:flexible_strategy'] ?? 0;
-              const aDiffF = mapSingleDriverAwarenessToDifference(attacker.awareness);
-              const dDiffF = mapSingleDriverAwarenessToDifference(defender.awareness + flexModF);
+              const azWallsDontForgiveFailWet =
+                newState.track.name === 'Azerbaijan' &&
+                attacker.awareness < 10 &&
+                defender.awareness + flexModF < 10;
+
+              const aDiffF = azWallsDontForgiveFailWet ? 7 : mapSingleDriverAwarenessToDifference(attacker.awareness);
+              const dDiffF = azWallsDontForgiveFailWet ? 7 : mapSingleDriverAwarenessToDifference(defender.awareness + flexModF);
 
               let d6af = createDiceResult('awareness', 'd6', 6);
               let d6df = createDiceResult('awareness', 'd6', 6);
@@ -1863,6 +2030,35 @@ const normalizePositions = (standings: DriverRaceState[]): DriverRaceState[] => 
   const dnf = standings
     .filter(s => s.isDNF)
     .sort((a, b) => b.position - a.position);
+  dnf.forEach((s, i) => { s.position = active.length + i + 1; });
+
+  return [...active, ...dnf];
+};
+
+// Apply a position loss among active (non-DNF) runners, then normalize positions.
+// Mirrors the GM engine's behavior for "drop driver down by N active slots".
+const applyPositionLoss = (
+  standings: DriverRaceState[],
+  driverId: string,
+  positionsLost: number
+): DriverRaceState[] => {
+  if (positionsLost <= 0) return standings;
+
+  const active: DriverRaceState[] = standings
+    .filter(s => !s.isDNF)
+    .sort((a, b) => a.position - b.position);
+  const dnf: DriverRaceState[] = standings
+    .filter(s => s.isDNF)
+    .sort((a, b) => b.position - a.position);
+
+  const fromIndex = active.findIndex(s => s.driverId === driverId);
+  if (fromIndex === -1) return standings;
+
+  const [driverState] = active.splice(fromIndex, 1);
+  const targetIndex = Math.min(fromIndex + positionsLost, active.length);
+  active.splice(targetIndex, 0, driverState);
+
+  active.forEach((s, i) => { s.position = i + 1; });
   dnf.forEach((s, i) => { s.position = active.length + i + 1; });
 
   return [...active, ...dnf];
