@@ -68,6 +68,13 @@ export interface TyreWearResult {
   puncturedThisLap: boolean;
 }
 
+/** Momentum Loss: one extra unit of wear without advancing the race lap. */
+export const applyMomentumLossTyreWear = (tyre: DriverTyreState): DriverTyreState => ({
+  ...tyre,
+  currentLap: tyre.currentLap + 1,
+  lifeRemaining: Math.max(0, tyre.lifeRemaining - 1),
+});
+
 export const applyLapTyreWear = (
   tyre: DriverTyreState,
   driver: Driver,

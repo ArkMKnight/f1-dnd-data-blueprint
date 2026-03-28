@@ -420,6 +420,7 @@ export interface MomentumLossState {
   // - Does not apply stat penalties
   // - Cannot escalate into damage
   // - Does not trigger Safety Car or Red Flag
+  // - Applies −1 tyre life (lifeRemaining) and +1 laps-on-tyre (currentLap) to affected driver(s)
 }
 
 // Momentum Loss resolution timing: After Awareness, before Damage/Tire/Pit

@@ -43,7 +43,13 @@ import {
 } from './track-compatibility';
 import type { DriverRaceState, RaceState } from './race-engine';
 import { initializeRace, appendLiveRaceEvent } from './race-engine';
-import { executePitStop, getTyreStatus, getTyrePhase1Modifiers, getPuncturePhase3Penalty } from './tyre-system';
+import {
+  applyMomentumLossTyreWear,
+  executePitStop,
+  getTyreStatus,
+  getTyrePhase1Modifiers,
+  getPuncturePhase3Penalty,
+} from './tyre-system';
 import {
   resolveRollWithTraits,
   initTraitRuntimeState,
@@ -2437,6 +2443,9 @@ const resolveAwareness = (state: GMState, attackerRoll: number, defenderRoll: nu
     const loss = race.track.momentumLossPositions;
     if (loss <= 0) return;
     applyPositionLoss(race, driverState.driverId, loss);
+    if (!driverState.isDNF) {
+      driverState.tyreState = applyMomentumLossTyreWear(driverState.tyreState);
+    }
     race.eventLog.push({
       lap: race.currentLap,
       type: 'momentum_loss',

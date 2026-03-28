@@ -54,6 +54,7 @@ import {
   type TraitRuntimeState,
 } from './trait-engine';
 import {
+  applyMomentumLossTyreWear,
   createInitialDriverTyreState,
   executePitStop,
   getTyrePhase1Modifiers,
@@ -1047,6 +1048,9 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             const lossW = newState.track.momentumLossPositions;
             if (attOutcome === 'momentumLoss') {
               attackerState.position = Math.min(attackerState.position + lossW, maxPosW);
+              if (!attackerState.isDNF) {
+                attackerState.tyreState = applyMomentumLossTyreWear(attackerState.tyreState);
+              }
               newState.eventLog.push({
                 lap,
                 type: 'momentum_loss',
@@ -1055,6 +1059,9 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             }
             if (defOutcome === 'momentumLoss') {
               defenderState.position = Math.min(defenderState.position + lossW, maxPosW);
+              if (!defenderState.isDNF) {
+                defenderState.tyreState = applyMomentumLossTyreWear(defenderState.tyreState);
+              }
               newState.eventLog.push({
                 lap,
                 type: 'momentum_loss',
@@ -1157,6 +1164,12 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               const maxPos = standings.filter(s => !s.isDNF).length;
               defenderState.position = Math.min(defenderState.position + newState.track.momentumLossPositions, maxPos);
               attackerState.position = Math.min(attackerState.position + newState.track.momentumLossPositions, maxPos);
+              if (!defenderState.isDNF) {
+                defenderState.tyreState = applyMomentumLossTyreWear(defenderState.tyreState);
+              }
+              if (!attackerState.isDNF) {
+                attackerState.tyreState = applyMomentumLossTyreWear(attackerState.tyreState);
+              }
               newState.eventLog.push({
                 lap,
                 type: 'momentum_loss',
@@ -1594,6 +1607,12 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
             const maxPos = standings.filter(s => !s.isDNF).length;
             defenderState.position = Math.min(defenderState.position + newState.track.momentumLossPositions, maxPos);
             attackerState.position = Math.min(attackerState.position + newState.track.momentumLossPositions, maxPos);
+            if (!defenderState.isDNF) {
+              defenderState.tyreState = applyMomentumLossTyreWear(defenderState.tyreState);
+            }
+            if (!attackerState.isDNF) {
+              attackerState.tyreState = applyMomentumLossTyreWear(attackerState.tyreState);
+            }
             newState.eventLog.push({ lap, type: 'momentum_loss', description: `Both lose position(s): ${defender.name}, ${attacker.name}` });
           }
         } else {
@@ -1812,6 +1831,9 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               const lossF = newState.track.momentumLossPositions;
               if (attOutF === 'momentumLoss') {
                 attackerState.position = Math.min(attackerState.position + lossF, maxPosF);
+                if (!attackerState.isDNF) {
+                  attackerState.tyreState = applyMomentumLossTyreWear(attackerState.tyreState);
+                }
                 newState.eventLog.push({
                   lap,
                   type: 'momentum_loss',
@@ -1820,6 +1842,9 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
               }
               if (defOutF === 'momentumLoss') {
                 defenderState.position = Math.min(defenderState.position + lossF, maxPosF);
+                if (!defenderState.isDNF) {
+                  defenderState.tyreState = applyMomentumLossTyreWear(defenderState.tyreState);
+                }
                 newState.eventLog.push({
                   lap,
                   type: 'momentum_loss',
@@ -1918,6 +1943,12 @@ export const simulateLap = (state: RaceState, teamsOverride?: Team[] | null): Ra
                   attackerState.position + newState.track.momentumLossPositions,
                   maxPos
                 );
+                if (!defenderState.isDNF) {
+                  defenderState.tyreState = applyMomentumLossTyreWear(defenderState.tyreState);
+                }
+                if (!attackerState.isDNF) {
+                  attackerState.tyreState = applyMomentumLossTyreWear(attackerState.tyreState);
+                }
                 newState.eventLog.push({
                   lap,
                   type: 'momentum_loss',
