@@ -200,7 +200,8 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
           return state;
         }
       }
-      // Increment tyres (paused under Safety Car)
+      // Increment tyres (paused under Safety Car — Experimental Parts laps defer increment
+      // until after rolls; see experimental_parts_roll, which is not SC-paused.)
       if (race.raceFlag !== 'safetyCar') {
         race.standings.forEach(s => {
           if (!s.isDNF) s.tyreState = { ...s.tyreState, currentLap: s.tyreState.currentLap + 1 };
@@ -266,11 +267,12 @@ export const advanceGMState = (gm: GMState, input?: number | string): GMState =>
       }
       state.pendingPrompt = null;
       state.currentPhase = 'pit_decision';
-      if (race.raceFlag !== 'safetyCar') {
-        race.standings.forEach(sx => {
-          if (!sx.isDNF) sx.tyreState = { ...sx.tyreState, currentLap: sx.tyreState.currentLap + 1 };
-        });
-      }
+      // Deferred lap_start tyre increment for Exp Parts laps (lap_start returned early above).
+      // Safety Car pauses normal tyre wear but not the Experimental Parts sequence — rolls and
+      // this increment still apply.
+      race.standings.forEach(sx => {
+        if (!sx.isDNF) sx.tyreState = { ...sx.tyreState, currentLap: sx.tyreState.currentLap + 1 };
+      });
       race.eventLog.push({ lap: currentLapNum, type: 'lap_start', description: `Lap ${currentLapNum} begins` });
       state.currentOpportunityIndex = 0;
       return advanceGMState(state);

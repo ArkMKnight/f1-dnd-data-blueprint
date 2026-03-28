@@ -98,6 +98,46 @@ describe('simulation regressions', () => {
     );
   });
 
+  it('still advances tyre laps after Experimental Parts under Safety Car (deferred increment)', () => {
+    const track = TRACKS.find(t => t.id === 'tr2')!;
+    const drivers = INITIAL_DRIVERS
+      .filter(d => d.teamId === 't1' || d.teamId === 't2')
+      .slice(0, 3);
+    const teams = INITIAL_TEAMS.filter(t => drivers.some(d => d.teamId === t.id));
+    const cars = getCarsForDrivers(teams, drivers);
+
+    const gm = initGMSession(track, drivers, cars, teams, 'medium', 20);
+    const [p6LikeDriver, activeDriver] = gm.raceState.standings;
+
+    gm.raceState.raceFlag = 'safetyCar';
+    gm.raceState.standings = [
+      { ...p6LikeDriver, position: 1, isDNF: false },
+      { ...activeDriver, position: 2, isDNF: false },
+      gm.raceState.standings[2],
+    ];
+
+    const beforeA = gm.raceState.standings[0].tyreState.currentLap;
+    const beforeB = gm.raceState.standings[1].tyreState.currentLap;
+
+    gm.currentPhase = 'experimental_parts_roll';
+    gm.pendingPrompt = {
+      phase: 'experimental_parts_roll',
+      description: 'test',
+      needsInput: true,
+      inputType: 'roll',
+      diceSize: 6,
+      context: {
+        driverEntries: [{ driverId: p6LikeDriver.driverId, driverName: 'Test Driver' }],
+        driverIndex: 0,
+        currentLapNum: 15,
+      },
+    };
+
+    const next = advanceGMState(gm, 6);
+    expect(next.raceState.standings[0].tyreState.currentLap).toBe(beforeA + 1);
+    expect(next.raceState.standings[1].tyreState.currentLap).toBe(beforeB + 1);
+  });
+
   it('applies consistent wet bucket behaviour while keeping wet tyre penalty in wet weather', () => {
     const track = TRACKS.find(t => t.id === 'tr2')!;
 
